@@ -3,9 +3,12 @@ package main
 import (
 	"bufio"
 	"encoding/binary"
+	// "encoding/hex"
 	"fmt"
+	// "io"
 	"net"
 	"os"
+	// "reflect"
 	// "strconv"
 )
 
@@ -14,7 +17,8 @@ var FILE_PATH string
 // var BUFFER_SIZE uint
 
 func main() {
-	FILE_PATH = os.Args[1]
+	// FILE_PATH = os.Args[1]
+	FILE_PATH = "./.data/file.1G.dat"
 	// buffer_size, _ := strconv.Atoi(os.Args[2])
 	// BUFFER_SIZE = uint(buffer_size)
 
@@ -27,16 +31,19 @@ func main() {
 	// accept and handle connections
 	for {
 		conn, err := ln.Accept()
+		// fmt.Println("Received connection: ", conn, "type(", reflect.TypeOf(conn), ")")
 		if err != nil {
 			fmt.Println(err)
 			continue
 		}
 		// handle connections in routine
+		fmt.Println("New Connection")
 		go handleConnection(conn)
 	}
 }
 
 func handleConnection(conn net.Conn) {
+	// net.TCPConn
 	buf := make([]byte, 8)
 	n, err := conn.Read(buf)
 	if n != 8 || err != nil {
@@ -57,14 +64,37 @@ func handleConnection(conn net.Conn) {
 		fmt.Println(err)
 		return
 	}
+	// defer f.Close()
+
+	// defer conn.Close()
+	// fmt.Println("Writing from ", FILE_PATH)
+	// // written, err := io.Copy(conn, f)
+	// written, err := f.WriteTo(conn)
+	//
+	// if err != nil {
+	// 	fmt.Println(err)
+	// 	return
+	// }
+	//
+	// fmt.Println(written)
+
 	go writeConnStream(conn, stream)
 	go readFileStream(f, stream, buffer_size)
 }
 
+func flush(writer *bufio.Writer) {
+	fmt.Println("flushing writer")
+	writer.Flush()
+}
+
+func connClose(conn net.Conn) {
+	fmt.Println("closing connection")
+	conn.Close()
+}
+
 func writeConnStream(conn net.Conn, stream <-chan []byte) {
-	defer conn.Close()
+	defer connClose(conn)
 	writer := bufio.NewWriter(conn)
-	defer writer.Flush()
 
 	for {
 		buf, more := <-stream
@@ -73,15 +103,16 @@ func writeConnStream(conn net.Conn, stream <-chan []byte) {
 		}
 
 		n, err := writer.Write(buf)
-		// fmt.Println(buf, n)
 		if err != nil {
-			// fmt.Println(buf, n, err)
+			fmt.Println(buf, n, err)
 			return
 		}
 		if n < 1 {
 			break
 		}
 	}
+
+	flush(writer)
 }
 
 func readFileStream(f *os.File, stream chan<- []byte, buffer_size uint) {
