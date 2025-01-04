@@ -2,18 +2,13 @@ package main
 
 import (
 	"fmt"
-	"os"
-
 	"gopkg.in/yaml.v3"
+	"os"
 )
 
 type NodeConfig struct {
-	LogLevel           string `yaml:"logLevel"`
-	ManagedDirectories []struct {
-		Path    string   `yaml:"path"`
-		Include []string `yaml:"incl"`
-		Exclude []string `yaml:"excl"`
-	} `yaml:"dirs"`
+	LogLevel           string             `yaml:"logLevel"`
+	ManagedDirectories []ManagedDirectory `yaml:"dirs"`
 }
 
 const CONFIG_YAML_PATH = "./.data/cnf.yaml"
@@ -33,12 +28,27 @@ func main() {
 		os.Exit(1)
 	}
 
-	fmt.Println(config)
+	logger.Info(fmt.Sprintf("Running w/ config:%v\n", config))
 
-	logger.Debug("Debug Test")
-	logger.Info("Info Test")
-	logger.Warn("Warn Test")
-	logger.Error("Error Test")
+	homedir, err := os.UserHomeDir()
+	if err != nil {
+		logger.Error(fmt.Sprintf("Failed to retrieve user home directory: \n%v\n", err))
+	}
+
+	logger.Debug(fmt.Sprintf("Initializing files relative to user home dir: %v\n", homedir))
+
+	managedMap, err := makeManagedMap(homedir, config.ManagedDirectories)
+	if err != nil {
+		logger.Error(err.Error())
+		os.Exit(1) // TODO: gracefully handle these
+	}
+
+	for managedDir, managedFiles := range managedMap {
+		logger.Debug(fmt.Sprintf("ManagedDir: %v\n", managedDir))
+		for _, managedFile := range managedFiles {
+			logger.Debug(fmt.Sprintf(" - %v\n", managedFile))
+		}
+	}
 }
 
 func makeLogger(levelStr string) (Logger, error) {
