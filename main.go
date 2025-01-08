@@ -2,11 +2,13 @@ package main
 
 import (
 	"fmt"
-	"gopkg.in/yaml.v3"
 	"os"
+
+	"gopkg.in/yaml.v3"
 )
 
 type NodeConfig struct {
+	DSN                string             `yaml:"dsn"`
 	LogLevel           string             `yaml:"logLevel"`
 	ManagedDirectories []ManagedDirectory `yaml:"dirs"`
 }
@@ -30,6 +32,12 @@ func main() {
 
 	logger.Info(fmt.Sprintf("Running w/ config:%v\n", config))
 
+	db, err := initDb(config.DSN)
+	if err != nil {
+		logger.Error(err.Error())
+		os.Exit(1) // TODO: gracefully handle these
+	}
+
 	homedir, err := os.UserHomeDir()
 	if err != nil {
 		logger.Error(fmt.Sprintf("Failed to retrieve user home directory: \n%v\n", err))
@@ -46,7 +54,11 @@ func main() {
 	for managedDir, managedFiles := range managedMap {
 		logger.Debug(fmt.Sprintf("ManagedDir: %v\n", managedDir))
 		for _, managedFile := range managedFiles {
-			logger.Debug(fmt.Sprintf(" - %v\n", managedFile))
+			logger.Debug(fmt.Sprintf("Upserting FileState - %q\n", managedFile[0].Path))
+			err := db.UpsertFileState(&managedFile[0])
+			if err != nil {
+				logger.Error(fmt.Sprintf("Failed to upsert managed file %q\n%s", managedFile[0].Path, err.Error()))
+			}
 		}
 	}
 }

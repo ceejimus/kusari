@@ -8,6 +8,7 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"strings"
 	"time"
 
 	"io/fs"
@@ -22,11 +23,11 @@ type ManagedDirectory struct {
 }
 
 type FileState struct {
-	Path    string
-	Updated time.Time
-	ModTime time.Time
-	Size    int64
-	Hash    string
+	Path      string
+	Hash      string
+	Size      int64
+	ModTime   time.Time
+	Timestamp time.Time
 }
 
 type ManagedMap map[string]map[string][]FileState
@@ -51,7 +52,12 @@ func getManagedFiles(homedir string, managedDir ManagedDirectory) (map[string][]
 	inclGlobs := mapToGlobs(managedDir.Include)
 	exclGlobs := mapToGlobs(managedDir.Exclude)
 
-	err := filepath.WalkDir(filepath.Join(homedir, managedDir.Path), func(path string, d fs.DirEntry, err error) error {
+	fullPath := filepath.Join(homedir, managedDir.Path)
+	if !strings.HasSuffix(fullPath, "/") {
+		fullPath = fmt.Sprintf("%v/", fullPath)
+	}
+	logger.Debug(fmt.Sprintf("homedir: %v - managedDir.Path: %v - %v\n", homedir, managedDir.Path, fullPath))
+	err := filepath.WalkDir(fullPath, func(path string, d fs.DirEntry, err error) error {
 
 		if err != nil {
 			return errors.New(fmt.Sprintf("Failure when walking dir: %v\npath: %v\n%v\n", managedDir.Path, path, err))
@@ -80,6 +86,8 @@ func getManagedFiles(homedir string, managedDir ManagedDirectory) (map[string][]
 		}
 
 		filestate, err := getFileState(path, fileinfo)
+		// logger.Debug(fmt.Sprintf("fullPath: %v, filepath: %v\n", fullPath, filestate.Path))
+		filestate.Path = strings.Replace(filestate.Path, fullPath, "", 1)
 		if err != nil {
 			return err
 		}
@@ -131,12 +139,14 @@ func getFileState(path string, fileinfo fs.FileInfo) (*FileState, error) {
 		return nil, err
 	}
 
+	// logger.Debug(fmt.Sprintf("filehash: %v, len: %d\n", filehash, len(filehash)))
+
 	return &FileState{
-		Path:    path,
-		Updated: time.Now(),
-		ModTime: fileinfo.ModTime(),
-		Size:    fileinfo.Size(),
-		Hash:    filehash,
+		Path:      path,
+		Timestamp: time.Now(),
+		ModTime:   fileinfo.ModTime(),
+		Size:      fileinfo.Size(),
+		Hash:      filehash,
 	}, nil
 }
 
