@@ -63,22 +63,27 @@ func getManagedFiles(homedir string, managedDir ManagedDirectory) (map[string][]
 			return errors.New(fmt.Sprintf("Failure when walking dir: %v\npath: %v\n%v\n", managedDir.Path, path, err))
 		}
 
+		localPath := strings.Replace(path, fullPath, "", 1)
+
 		// we're only going to look at regular files for now
 		// TODO: via config, have the sync store sources for links that are below user home and manage those too
 		// TODO: implement our own directory recursion?
 		if fs.ModeType&d.Type() != 0 {
-			logger.Debug(fmt.Sprintf("SKIPPING - %v : %v : %v", path, d, err))
+			logger.Debug(fmt.Sprintf("SKIPPING - %v : %v", localPath, d))
+			return nil
 		}
 
 		if checkGlobs(exclGlobs, d.Name(), false) {
-			logger.Debug(fmt.Sprintf("Excluded - %v : %v : %v", path, d, err))
+			logger.Debug(fmt.Sprintf("Excluded - %v : %v", localPath, d))
 			return nil
 		}
 
 		if !checkGlobs(inclGlobs, d.Name(), true) {
-			logger.Debug(fmt.Sprintf("Not included - %v : %v : %v", path, d, err))
+			logger.Debug(fmt.Sprintf("Not included - %v : %v", localPath, d))
 			return nil
 		}
+
+		logger.Debug(fmt.Sprintf("Adding - %v : %v", localPath, d))
 
 		fileinfo, err := d.Info()
 		if err != nil {
@@ -86,7 +91,6 @@ func getManagedFiles(homedir string, managedDir ManagedDirectory) (map[string][]
 		}
 
 		filestate, err := getFileState(path, fileinfo)
-		// logger.Debug(fmt.Sprintf("fullPath: %v, filepath: %v\n", fullPath, filestate.Path))
 		filestate.Path = strings.Replace(filestate.Path, fullPath, "", 1)
 		if err != nil {
 			return err
