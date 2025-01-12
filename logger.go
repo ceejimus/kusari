@@ -10,7 +10,8 @@ import (
 type LogLevel int
 
 const (
-	DEBUG LogLevel = iota
+	TRACE LogLevel = iota
+	DEBUG
 	INFO
 	WARN
 	ERROR
@@ -18,7 +19,7 @@ const (
 
 const DEFAULT_LOG_LEVEL = 2
 
-var logLevelNames = []string{"DEBUG", "INFO", "WARN", "ERROR"}
+var logLevelNames = []string{"TRACE", "DEBUG", "INFO", "WARN", "ERROR"}
 
 func (level LogLevel) String() string {
 	if level < DEBUG || level > ERROR {
@@ -62,6 +63,10 @@ func (logger *Logger) log(level LogLevel, message string) {
 	log.Printf("[%s] %s: %s", level, funcName, message)
 }
 
+func (logger *Logger) Trace(message string) {
+	logger.log(TRACE, message)
+}
+
 func (logger *Logger) Debug(message string) {
 	logger.log(DEBUG, message)
 }
@@ -76,4 +81,13 @@ func (logger *Logger) Warn(message string) {
 
 func (logger *Logger) Error(message string) {
 	logger.log(ERROR, message)
+}
+
+func makeLogger(levelStr string) (Logger, error) {
+	level, err := Logger{}.ParseLogLevel(levelStr)
+	if err != nil {
+		return Logger{}, err
+	}
+	logger := Logger{}.New(level)
+	return logger, nil
 }

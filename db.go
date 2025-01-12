@@ -1,17 +1,17 @@
 package main
 
 import (
+	"context"
 	"fmt"
 	"io/fs"
 	"os"
 	"time"
 
-	"zombiezen.com/go/sqlite"
 	"zombiezen.com/go/sqlite/sqlitex"
 )
 
 type DB struct {
-	conn *sqlite.Conn
+	pool *sqlitex.Pool
 	fs   fs.FS
 }
 
@@ -39,16 +39,31 @@ func makeExecOptions(args ScriptArgs) *sqlitex.ExecOptions {
 
 // TODO: handle processing results
 // TODO: create non-Transient version w/ helper to create execOptions
+// TODO: properly use contexts: https://pkg.go.dev/zombiezen.com/go/sqlite@v1.4.0#Conn.SetInterrupt
 func (db *DB) ExecScriptTransient(script_path string, args ScriptArgs) error {
+	context.TODO()
+	conn, err := db.pool.Take(context.TODO())
+	if err != nil {
+		return err
+	}
+	defer db.pool.Put(conn)
+
 	execOptions := makeExecOptions(args)
-	logger.Debug(fmt.Sprintf("Calling script %q w/ params\n%+v", script_path, execOptions))
-	return sqlitex.ExecuteTransientFS(db.conn, db.fs, script_path, execOptions)
+	logger.Trace(fmt.Sprintf("Calling script %q w/ params\n%+v", script_path, execOptions))
+	return sqlitex.ExecuteTransientFS(conn, db.fs, script_path, execOptions)
 }
 
 func (db *DB) ExecScript(script_path string, args ScriptArgs) error {
+	context.TODO()
+	conn, err := db.pool.Take(context.TODO())
+	if err != nil {
+		return err
+	}
+	defer db.pool.Put(conn)
+
 	execOptions := makeExecOptions(args)
-	logger.Debug(fmt.Sprintf("Calling script %q w/ params\n%+v", script_path, execOptions))
-	return sqlitex.ExecuteFS(db.conn, db.fs, script_path, execOptions)
+	logger.Trace(fmt.Sprintf("Calling script %q w/ params\n%+v", script_path, execOptions))
+	return sqlitex.ExecuteFS(conn, db.fs, script_path, execOptions)
 }
 
 func ToSQLTime(t time.Time) int64 {
@@ -57,13 +72,18 @@ func ToSQLTime(t time.Time) int64 {
 
 func initDb(sqlite_dsn string) (*DB, error) {
 	// conn, err := sqlite.OpenConn(sqlite_dsn, sqlite.OpenReadWrite, sqlite.OpenCreate)
-	conn, err := sqlite.OpenConn(sqlite_dsn)
+	// conn, err := sqlite.OpenConn(sqlite_dsn)
+	// if err != nil {
+	// 	return nil, err
+	// }
+
+	pool, err := sqlitex.NewPool(sqlite_dsn, sqlitex.PoolOptions{})
 	if err != nil {
 		return nil, err
 	}
 
 	db := DB{
-		conn: conn,
+		pool: pool,
 		fs:   os.DirFS("./sql/"),
 	}
 

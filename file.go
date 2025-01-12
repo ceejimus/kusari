@@ -30,60 +30,59 @@ type FileState struct {
 	Timestamp time.Time
 }
 
-type ManagedMap map[string]map[string][]FileState
+type ManagedMap map[string]map[string]FileState
 
-func makeManagedMap(homedir string, managedDirs []ManagedDirectory) (ManagedMap, error) {
-	managedMap := make(ManagedMap)
+func getManagedDirectoryFileStates(topdir string, managedDirs []ManagedDirectory) (map[string][]FileState, error) {
+	managedMap := make(map[string][]FileState)
 
 	for _, managedDir := range managedDirs {
-		managedFiles, err := getManagedFiles(homedir, managedDir)
+		managedFiles, err := getManagedFiles(topdir, managedDir)
 		if err != nil {
 			return nil, err
 		}
+
 		managedMap[managedDir.Path] = managedFiles
 	}
 
 	return managedMap, nil
 }
 
-func getManagedFiles(homedir string, managedDir ManagedDirectory) (map[string][]FileState, error) {
-	managedFiles := make(map[string][]FileState)
+func getManagedFiles(topdir string, managedDir ManagedDirectory) ([]FileState, error) {
+	managedFiles := make([]FileState, 0)
 
 	inclGlobs := mapToGlobs(managedDir.Include)
 	exclGlobs := mapToGlobs(managedDir.Exclude)
 
-	fullPath := filepath.Join(homedir, managedDir.Path)
-	if !strings.HasSuffix(fullPath, "/") {
-		fullPath = fmt.Sprintf("%v/", fullPath)
-	}
-	logger.Debug(fmt.Sprintf("homedir: %v - managedDir.Path: %v - %v\n", homedir, managedDir.Path, fullPath))
+	fullPath := filepath.Join(topdir, managedDir.Path)
+
+	logger.Trace(fmt.Sprintf("homedir: %v - managedDir.Path: %v - %v\n", topdir, managedDir.Path, fullPath))
 	err := filepath.WalkDir(fullPath, func(path string, d fs.DirEntry, err error) error {
 
 		if err != nil {
 			return errors.New(fmt.Sprintf("Failure when walking dir: %v\npath: %v\n%v\n", managedDir.Path, path, err))
 		}
 
-		localPath := strings.Replace(path, fullPath, "", 1)
+		localPath := relPath(path, fullPath)
 
 		// we're only going to look at regular files for now
 		// TODO: via config, have the sync store sources for links that are below user home and manage those too
 		// TODO: implement our own directory recursion?
 		if fs.ModeType&d.Type() != 0 {
-			logger.Debug(fmt.Sprintf("SKIPPING - %v : %v", localPath, d))
+			logger.Trace(fmt.Sprintf("SKIPPING - %v : %v", localPath, d))
 			return nil
 		}
 
-		if checkGlobs(exclGlobs, d.Name(), false) {
-			logger.Debug(fmt.Sprintf("Excluded - %v : %v", localPath, d))
+		if checkGlobs(exclGlobs, localPath, false) {
+			logger.Trace(fmt.Sprintf("Excluded - %v : %v", localPath, d))
 			return nil
 		}
 
-		if !checkGlobs(inclGlobs, d.Name(), true) {
-			logger.Debug(fmt.Sprintf("Not included - %v : %v", localPath, d))
+		if !checkGlobs(inclGlobs, localPath, true) {
+			logger.Trace(fmt.Sprintf("Not included - %v : %v", localPath, d))
 			return nil
 		}
 
-		logger.Debug(fmt.Sprintf("Adding - %v : %v", localPath, d))
+		logger.Trace(fmt.Sprintf("Adding - %v : %v", localPath, d))
 
 		fileinfo, err := d.Info()
 		if err != nil {
@@ -91,12 +90,12 @@ func getManagedFiles(homedir string, managedDir ManagedDirectory) (map[string][]
 		}
 
 		filestate, err := getFileState(path, fileinfo)
-		filestate.Path = strings.Replace(filestate.Path, fullPath, "", 1)
+		filestate.Path = relPath(filestate.Path, fullPath)
 		if err != nil {
 			return err
 		}
 
-		managedFiles[path] = []FileState{*filestate}
+		managedFiles = append(managedFiles, *filestate)
 
 		return nil
 	})
@@ -106,6 +105,13 @@ func getManagedFiles(homedir string, managedDir ManagedDirectory) (map[string][]
 	}
 
 	return managedFiles, nil
+}
+
+func relPath(fullPath string, relDir string) string {
+	if !strings.HasSuffix(relDir, "/") {
+		relDir = fmt.Sprintf("%v/", relDir)
+	}
+	return strings.Replace(fullPath, relDir, "", 1)
 }
 
 // fileinfo, err := os.Lstat(path)
@@ -143,7 +149,7 @@ func getFileState(path string, fileinfo fs.FileInfo) (*FileState, error) {
 		return nil, err
 	}
 
-	// logger.Debug(fmt.Sprintf("filehash: %v, len: %d\n", filehash, len(filehash)))
+	// logger.Trace(fmt.Sprintf("filehash: %v, len: %d\n", filehash, len(filehash)))
 
 	return &FileState{
 		Path:      path,
