@@ -53,16 +53,16 @@ func getManagedFiles(topdir string, managedDir ManagedDirectory) ([]FileState, e
 	inclGlobs := mapToGlobs(managedDir.Include)
 	exclGlobs := mapToGlobs(managedDir.Exclude)
 
-	fullPath := filepath.Join(topdir, managedDir.Path)
+	fullDirPath := filepath.Join(topdir, managedDir.Path)
 
-	logger.Trace(fmt.Sprintf("homedir: %v - managedDir.Path: %v - %v\n", topdir, managedDir.Path, fullPath))
-	err := filepath.WalkDir(fullPath, func(path string, d fs.DirEntry, err error) error {
+	logger.Trace(fmt.Sprintf("topdir: %q - managedDir.Path: %q - %q\n", topdir, managedDir.Path, fullDirPath))
+	err := filepath.WalkDir(fullDirPath, func(path string, d fs.DirEntry, err error) error {
 
 		if err != nil {
 			return errors.New(fmt.Sprintf("Failure when walking dir: %v\npath: %v\n%v\n", managedDir.Path, path, err))
 		}
 
-		localPath := relPath(path, fullPath)
+		localPath := relPath(path, fullDirPath)
 
 		// we're only going to look at regular files for now
 		// TODO: via config, have the sync store sources for links that are below user home and manage those too
@@ -89,8 +89,8 @@ func getManagedFiles(topdir string, managedDir ManagedDirectory) ([]FileState, e
 			return err
 		}
 
-		filestate, err := getFileState(path, fileinfo)
-		filestate.Path = relPath(filestate.Path, fullPath)
+		// TODO: fix this up we shouldn't need to re-write this
+		filestate, err := getFileState(fullDirPath, path, fileinfo)
 		if err != nil {
 			return err
 		}
@@ -143,16 +143,16 @@ func checkGlobs(globs []glob.Glob, input string, onEmpty bool) bool {
 	return false
 }
 
-func getFileState(path string, fileinfo fs.FileInfo) (*FileState, error) {
+func getFileState(relDir string, path string, fileinfo fs.FileInfo) (*FileState, error) {
 	filehash, err := fileHash(path)
 	if err != nil {
-		return nil, err
+		return nil, errors.New(fmt.Sprintf("Failed to hash file %q\n%v\n", path, err.Error()))
 	}
 
 	// logger.Trace(fmt.Sprintf("filehash: %v, len: %d\n", filehash, len(filehash)))
 
 	return &FileState{
-		Path:      path,
+		Path:      relPath(path, relDir),
 		Timestamp: time.Now(),
 		ModTime:   fileinfo.ModTime(),
 		Size:      fileinfo.Size(),

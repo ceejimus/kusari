@@ -15,11 +15,7 @@ func main() {
 		os.Exit(1)
 	}
 
-	logger, err = makeLogger(config.LogLevel)
-	if err != nil {
-		fmt.Fprintf(os.Stderr, "Failed to parse create logger @ '%s'\n%s\n", config.LogLevel, err)
-		os.Exit(1)
-	}
+	logger = makeLogger(config.LogLevel)
 
 	logger.Info(fmt.Sprintf("Running w/ config:%v\n", config))
 
@@ -29,18 +25,26 @@ func main() {
 		os.Exit(1) // TODO: gracefully handle these
 	}
 
-	fileStatePollTicker := time.NewTicker(1 * time.Second)
-	pollFileStateDone := make(chan bool, 1)
-	fileStateChannel := make(chan *FileState, 32)
+	// results, err := db.GetFileStateByPath("syncfile.txt")
+	//
+	// for _, r := range results {
+	// 	fmt.Printf("%+v\n", r)
+	// }
+	//
+	// os.Exit(0)
 
-	defer fileStatePollTicker.Stop()
+	// fileStatePollTicker := time.NewTicker(1 * time.Second)
+	// pollFileStateDone := make(chan bool, 1)
+	// fileStateChannel := make(chan *FileState, 32)
+	//
+	// defer fileStatePollTicker.Stop()
+	//
+	// go pollFileState(fileStatePollTicker.C, pollFileStateDone, fileStateChannel, config)
+	//
+	// upsertFileStateDone := make(chan bool, 1)
+	// go upsertFileStates(upsertFileStateDone, fileStateChannel, db)
 
-	go pollFileState(fileStatePollTicker.C, pollFileStateDone, fileStateChannel, config)
-
-	upsertFileStateDone := make(chan bool, 1)
-	go upsertFileStates(upsertFileStateDone, fileStateChannel, db)
-
-	go runApi(config)
+	go runApi(config, db)
 
 	// TODO: do something better than sleeping, use key event channel or something?
 	for {

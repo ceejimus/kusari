@@ -9,7 +9,7 @@ import (
 type NodeConfig struct {
 	DSN                string             `yaml:"dsn"`
 	LogLevel           string             `yaml:"logLevel"`
-	TopDir             string             `yaml:"topdir"`
+	TopDir             string             `yaml:"topDir"`
 	ManagedDirectories []ManagedDirectory `yaml:"dirs"`
 }
 

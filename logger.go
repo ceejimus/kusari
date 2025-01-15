@@ -1,8 +1,8 @@
 package main
 
 import (
-	"errors"
 	"log"
+	"os"
 	"runtime"
 	"strings"
 )
@@ -22,7 +22,7 @@ const DEFAULT_LOG_LEVEL = 2
 var logLevelNames = []string{"TRACE", "DEBUG", "INFO", "WARN", "ERROR"}
 
 func (level LogLevel) String() string {
-	if level < DEBUG || level > ERROR {
+	if level < TRACE || level > ERROR {
 		return logLevelNames[DEFAULT_LOG_LEVEL]
 	}
 	return logLevelNames[level]
@@ -32,14 +32,14 @@ type Logger struct {
 	level LogLevel
 }
 
-func (Logger) ParseLogLevel(levelStr string) (LogLevel, error) {
+func (Logger) ParseLogLevel(levelStr string) LogLevel {
 	for i, name := range logLevelNames {
 		if strings.EqualFold(levelStr, name) {
-			return LogLevel(i), nil
+			return LogLevel(i)
 		}
 	}
 
-	return -1, errors.New("invalid log level: " + levelStr)
+	return -1
 }
 
 func (Logger) New(level LogLevel) Logger {
@@ -83,11 +83,13 @@ func (logger *Logger) Error(message string) {
 	logger.log(ERROR, message)
 }
 
-func makeLogger(levelStr string) (Logger, error) {
-	level, err := Logger{}.ParseLogLevel(levelStr)
-	if err != nil {
-		return Logger{}, err
+func makeLogger(levelStr string) Logger {
+	// override w/ env variable
+	envLevelStr := os.Getenv("FILESERVER_LOG_LEVEL")
+	if envLevelStr != "" {
+		levelStr = envLevelStr
 	}
+	level := Logger{}.ParseLogLevel(levelStr)
 	logger := Logger{}.New(level)
-	return logger, nil
+	return logger
 }

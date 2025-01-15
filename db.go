@@ -7,16 +7,27 @@ import (
 	"os"
 	"time"
 
+	"zombiezen.com/go/sqlite"
 	"zombiezen.com/go/sqlite/sqlitex"
 )
+
+type ScriptArgs interface {
+	ToScriptArgs() map[string]any
+}
+
+type SQLiteResultTransformer[T any] interface {
+	FromSQLiteStmt(stmt *sqlite.Stmt) (*T, error)
+}
 
 type DB struct {
 	pool *sqlitex.Pool
 	fs   fs.FS
 }
 
-type ScriptArgs interface {
-	ToScriptArgs() map[string]any
+type ScriptArgsMap map[string]any
+
+func (sam *ScriptArgsMap) ToScriptArgs() map[string]any {
+	return *sam
 }
 
 func (fs *FileState) ToScriptArgs() map[string]any {
@@ -27,6 +38,16 @@ func (fs *FileState) ToScriptArgs() map[string]any {
 		":modtime":   ToSQLTime(fs.ModTime),
 		":timestamp": ToSQLTime(fs.Timestamp),
 	}
+}
+
+func (fs FileState) FromSQLiteStmt(stmt *sqlite.Stmt) (*FileState, error) {
+	return &FileState{
+		Path:      stmt.GetText("path"),
+		Hash:      stmt.GetText("hash"),
+		Size:      stmt.GetInt64("size"),
+		ModTime:   FromSQLTime(stmt.GetInt64("modtime")),
+		Timestamp: FromSQLTime(stmt.GetInt64("timestamp")),
+	}, nil
 }
 
 func makeExecOptions(args ScriptArgs) *sqlitex.ExecOptions {
@@ -53,21 +74,48 @@ func (db *DB) ExecScriptTransient(script_path string, args ScriptArgs) error {
 	return sqlitex.ExecuteTransientFS(conn, db.fs, script_path, execOptions)
 }
 
-func (db *DB) ExecScript(script_path string, args ScriptArgs) error {
+// TODO: figure out how to break this into multiple lines
+func ExecScript[T SQLiteResultTransformer[T]](db *DB, script_path string, args ScriptArgs) ([]*T, error) {
+	var results []*T
+
+	// TODO: create a method to get a conn, put context TODO inside that
 	context.TODO()
 	conn, err := db.pool.Take(context.TODO())
 	if err != nil {
-		return err
+		return nil, err
 	}
 	defer db.pool.Put(conn)
 
 	execOptions := makeExecOptions(args)
+
+	resultFunc := func(stmt *sqlite.Stmt) error {
+		var instance T
+		result, err := instance.FromSQLiteStmt(stmt)
+		if err != nil {
+			return err
+		}
+		results = append(results, result)
+		return nil
+	}
+
+	execOptions.ResultFunc = resultFunc
+
 	logger.Trace(fmt.Sprintf("Calling script %q w/ params\n%+v", script_path, execOptions))
-	return sqlitex.ExecuteFS(conn, db.fs, script_path, execOptions)
+
+	err = sqlitex.ExecuteFS(conn, db.fs, script_path, execOptions)
+	if err != nil {
+		return nil, err
+	}
+
+	return results, nil
 }
 
 func ToSQLTime(t time.Time) int64 {
 	return t.UnixMilli()
+}
+
+func FromSQLTime(t int64) time.Time {
+	return time.UnixMilli(t)
 }
 
 func initDb(sqlite_dsn string) (*DB, error) {
@@ -95,5 +143,12 @@ func initDb(sqlite_dsn string) (*DB, error) {
 }
 
 func (db *DB) UpsertFileState(fileState *FileState) error {
-	return db.ExecScript("upsert_filestate.sql", fileState)
+	_, err := ExecScript[FileState](db, "upsert_filestate.sql", fileState)
+	return err
+}
+
+func (db *DB) GetFileStateByPath(path string) ([]*FileState, error) {
+	scriptArgs := ScriptArgsMap{":path": path}
+	results, err := ExecScript[FileState](db, "query_filestate.sql", &scriptArgs)
+	return results, err
 }

@@ -101,16 +101,7 @@ func TestMain(m *testing.M) {
 }
 
 func setup() {
-	logLevel := os.Getenv("FILESERVER_LOG_LEVEL")
-	if logLevel == "" {
-		logLevel = "WARN"
-	}
-	myLogger, err := makeLogger(logLevel)
-	if err != nil {
-		fmt.Fprintf(os.Stderr, "Failed to parse create logger @ '%s'\n%s\n", "WARN", err)
-		os.Exit(1)
-	}
-	logger = myLogger
+	logger = makeLogger("")
 }
 
 func TestRelPathTrailingSlash(t *testing.T) {
