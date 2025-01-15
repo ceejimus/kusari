@@ -21,13 +21,13 @@ type SyncFileState struct {
 	Timestamp int64  `json:"timestamp"`
 }
 
-func (sfs *SyncFileState) ToFileState() *FileState {
-	return &FileState{
-		Path:      sfs.Path,
-		Hash:      sfs.Hash,
-		Size:      sfs.Size,
-		ModTime:   FromSQLTime(sfs.ModTime),
-		Timestamp: FromSQLTime(sfs.Timestamp),
+func (sfs *SyncFileState) ToFileState() *NodeState {
+	return &NodeState{
+		Path:    sfs.Path,
+		Hash:    &sfs.Hash,
+		Size:    sfs.Size,
+		ModTime: FromSQLTime(sfs.ModTime),
+		// Timestamp: FromSQLTime(sfs.Timestamp),
 	}
 }
 
@@ -87,13 +87,13 @@ func (h *syncHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	logger.Info(fmt.Sprintf("Received SyncRequest: \n%+v\n", syncRequest))
 	// w.Write([]byte(fmt.Sprintf("syncRequest %+v\n", syncRequest)))
 
-	peerFileStates := make(map[string][]FileState)
+	peerFileStates := make(map[string][]NodeState)
 
 	for _, sfs := range syncRequest.States {
 		peerFileState := *sfs.ToFileState()
 		fileStates, ok := peerFileStates[peerFileState.Path]
 		if !ok {
-			fileStates = make([]FileState, 0)
+			fileStates = make([]NodeState, 0)
 		}
 		peerFileStates[peerFileState.Path] = append(fileStates, peerFileState)
 	}
@@ -109,7 +109,7 @@ func (h *syncHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			writeError(w, http.StatusBadRequest, map[string]string{"message": fmt.Sprintf("No fileinfo for %q\n%v\n", fullPath, err.Error())})
 			return
 		}
-		fs, err := getFileState(relDir, fullPath, fileinfo)
+		fs, err := getNodeState(relDir, fullPath, fileinfo)
 		if err != nil {
 			writeError(w, http.StatusBadRequest, map[string]string{"message": fmt.Sprintf("Couldn't get host FileState for %q\n%v\n", relPath, err.Error())})
 			return

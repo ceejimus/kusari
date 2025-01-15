@@ -19,11 +19,11 @@ func main() {
 
 	logger.Info(fmt.Sprintf("Running w/ config:%v\n", config))
 
-	managedMap, err := getManagedDirectoryFileStates(config.TopDir, config.ManagedDirectories)
-	if err != nil {
-		logger.Error(err.Error())
-		os.Exit(1) // TODO: gracefully handle these
-	}
+	// managedMap, err := getManagedMap(config.TopDir, config.ManagedDirectories)
+	// if err != nil {
+	// 	logger.Error(err.Error())
+	// 	os.Exit(1) // TODO: gracefully handle these
+	// }
 
 	watcher := initWatcher(config)
 	go runWatcher(watcher)
@@ -58,9 +58,9 @@ func main() {
 	<-make(chan bool)
 }
 
-func pollFileState(tick <-chan time.Time, done <-chan bool, states chan<- *FileState, config *NodeConfig) {
+func pollFileState(tick <-chan time.Time, done <-chan bool, states chan<- *NodeState, config *NodeConfig) {
 	run := func() {
-		managedMap, err := getManagedDirectoryFileStates(config.TopDir, config.ManagedDirectories)
+		managedMap, err := getManagedMap(config.TopDir, config.ManagedDirectories)
 		if err != nil {
 			logger.Error(err.Error())
 			os.Exit(1) // TODO: gracefully handle these
@@ -96,7 +96,7 @@ func pollFileState(tick <-chan time.Time, done <-chan bool, states chan<- *FileS
 
 // TODO: batching
 // TODO: gracefully handle errors
-func upsertFileStates(done <-chan bool, states <-chan *FileState, db *DB) {
+func upsertFileStates(done <-chan bool, states <-chan *NodeState, db *DB) {
 	for {
 		select {
 		case <-done:

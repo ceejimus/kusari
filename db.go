@@ -30,23 +30,25 @@ func (sam *ScriptArgsMap) ToScriptArgs() map[string]any {
 	return *sam
 }
 
-func (fs *FileState) ToScriptArgs() map[string]any {
+func (fs *NodeState) ToScriptArgs() map[string]any {
 	return map[string]any{
-		":path":      fs.Path,
-		":hash":      fs.Hash,
-		":size":      fs.Size,
-		":modtime":   ToSQLTime(fs.ModTime),
-		":timestamp": ToSQLTime(fs.Timestamp),
+		":path":    fs.Path,
+		":hash":    fs.Hash,
+		":size":    fs.Size,
+		":modtime": ToSQLTime(fs.ModTime),
+		// ":timestamp": ToSQLTime(fs.Timestamp),
 	}
 }
 
-func (fs FileState) FromSQLiteStmt(stmt *sqlite.Stmt) (*FileState, error) {
-	return &FileState{
-		Path:      stmt.GetText("path"),
-		Hash:      stmt.GetText("hash"),
-		Size:      stmt.GetInt64("size"),
-		ModTime:   FromSQLTime(stmt.GetInt64("modtime")),
-		Timestamp: FromSQLTime(stmt.GetInt64("timestamp")),
+func (fs NodeState) FromSQLiteStmt(stmt *sqlite.Stmt) (*NodeState, error) {
+	hash := stmt.GetText("hash")
+	size := stmt.GetInt64("size")
+	return &NodeState{
+		Path:    stmt.GetText("path"),
+		Hash:    &hash,
+		Size:    size,
+		ModTime: FromSQLTime(stmt.GetInt64("modtime")),
+		// Timestamp: FromSQLTime(stmt.GetInt64("timestamp")),
 	}, nil
 }
 
@@ -142,13 +144,13 @@ func initDb(sqlite_dsn string) (*DB, error) {
 	return &db, nil
 }
 
-func (db *DB) UpsertFileState(fileState *FileState) error {
-	_, err := ExecScript[FileState](db, "upsert_filestate.sql", fileState)
+func (db *DB) UpsertFileState(fileState *NodeState) error {
+	_, err := ExecScript[NodeState](db, "upsert_filestate.sql", fileState)
 	return err
 }
 
-func (db *DB) GetFileStateByPath(path string) ([]*FileState, error) {
+func (db *DB) GetFileStateByPath(path string) ([]*NodeState, error) {
 	scriptArgs := ScriptArgsMap{":path": path}
-	results, err := ExecScript[FileState](db, "query_filestate.sql", &scriptArgs)
+	results, err := ExecScript[NodeState](db, "query_filestate.sql", &scriptArgs)
 	return results, err
 }

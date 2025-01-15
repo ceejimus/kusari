@@ -3,52 +3,41 @@ package main
 import (
 	"errors"
 	"fmt"
-	"io/fs"
 	"os"
 	"path/filepath"
 	"strings"
-	"syscall"
 	"time"
 
 	"github.com/fsnotify/fsnotify"
 	"github.com/google/uuid"
 )
 
-type NodeType int
-
-const (
-	FILE NodeType = iota + 1
-	DIR
-)
-
-type NodeMeta struct {
-	Type NodeType // file, dir, link ,etc
-	Ino  uint64   // inode
-}
-
 // TODO: make "enum"
 type FileEvent struct {
 	Type      string       // "create", "modify", "delete", "rename"
 	Timestamp time.Time    // time event processed
-	Path      string       // path of event (current or prior)
-	Hash      *string      // file hash
-	Node      *WatchedNode // pointer to parent node
+	State     *NodeState   // node state
+	Watched   *WatchedNode // pointer to parent watched node
 }
 
-// TODO make sure this stays sorted
 type WatchedNode struct {
-	UUID   uuid.UUID    // current path
-	Meta   NodeMeta     // node metadata
+	UUID   uuid.UUID    // id
 	Log    []*FileEvent // events for this file
 	Latest *FileEvent   // pointer to most recent event
+	Meta   *NodeMeta    // node metadata
+	// Node   Node         // actual node
 }
 
-// TODO use DB instead of in-memory not thread-safe thing
-type FileLog map[string]*WatchedNode
+// for create / write we can (and should) find watched via inode
+type WatchedInodeMap map[uint64]*WatchedNode
+
+// for rename / remove we don't have an inode anymore and can find by path
+type WatchedPathMap map[string]*WatchedNode
 
 type RenameEvents map[uint64]*FileEvent // map nodes that got rename events
 
-var fileLog = make(FileLog)
+var watchedInodeMap = make(WatchedInodeMap)
+var watchedPathMap = make(WatchedPathMap)
 var renameEvents = make(RenameEvents) // TODO clean stale entries
 
 var managedDirMap = make(map[string]ManagedDirectory)
@@ -118,37 +107,41 @@ func handleEvent(event *fsnotify.Event) error {
 
 	// two types of create events | new files | moved/renamed files
 	if fileEvent.Type == "create" {
-		if isRename := handleRename(fileEvent); !isRename {
-			fileLog[fileEvent.Path] = fileEvent.Node
-		}
+		watchedInodeMap[fileEvent.Watched.Meta.Ino] = fileEvent.Watched
+		watchedPathMap[fileEvent.State.Path] = fileEvent.Watched
 	}
 
-	// important to use THIS node since the fileEvent BEFORE handleRename may be a "pseudo" node
-	node := fileEvent.Node
+	watched := fileEvent.Watched
 
 	// we don't add rename events to our file log until we get the corresponding create event
-	if fileEvent.Type == "rename-signal" {
-		renameEvents[fileEvent.Node.Meta.Ino] = fileEvent
-	} else {
-		logger.Trace(fmt.Sprintf("Appending event to log {id: %v, log: %v}{type: %v, path: %v}", node.UUID, node.Log, fileEvent.Type, fileEvent.Path))
-		node.Latest = fileEvent
-		node.Log = append(node.Log, fileEvent)
-		node.Latest = fileEvent
-	}
+	// logger.Trace(fmt.Sprintln(watched, fileEvent.State))
+	// logger.Trace(fmt.Sprintf("Appending event to log {id: %v, log: %v}{type: %v, path: %v}",
+	// 	watched.UUID,
+	// 	watched.Log,
+	// 	fileEvent.Type,
+	// 	fileEvent.State.Path,
+	// ))
+	watched.Latest = fileEvent
+	watched.Log = append(watched.Log, fileEvent)
+	watched.Latest = fileEvent
 
 	// TODO: remove
 	// for debug purposes
 	if fileEvent.Type == "remove" {
-		for i, e := range node.Log {
-			logger.Info(fmt.Sprintf("%d - %p - %v %q\n", i, e, e.Type, e.Path))
+		for i, e := range watched.Log {
+			var path string
+			if e.State != nil {
+				path = e.State.Path
+			}
+			logger.Info(fmt.Sprintf("%d - %p - %v %q\n", i, e, e.Type, path))
 		}
 	}
 
 	return err
 }
 
+// translate fsnotify.Event to local type incl. file hash
 func toFileEvent(event *fsnotify.Event) (*FileEvent, error) {
-	var meta *NodeMeta
 	dirPath, dir := getEventManagedDir(event.Name)
 	if dirPath == "" || dir == nil {
 		return nil, errors.New(fmt.Sprintf("Failed to get managed dir for event: %v", event)) // if this ever happens something funky is probably going on
@@ -157,46 +150,59 @@ func toFileEvent(event *fsnotify.Event) (*FileEvent, error) {
 	relPath := getRelativePath(event.Name, dirPath)
 
 	fileEvent := &FileEvent{
-		Path:      relPath,
+		// Path:      relPath,
 		Timestamp: time.Now(),
 	}
 
-	node, nodeExists := fileLog[relPath]
-	if nodeExists {
-		fileEvent.Node = node
-		meta = &node.Meta
-	}
-
-	// translate fsnotify.Event to local type incl. file hash
 	switch {
 	case eventIs(fsnotify.Create, event):
 		logger.Info(fmt.Sprintf("Create event: %q", relPath))
 
 		fileEvent.Type = "create"
 
-		logger.Trace(fmt.Sprintf("Meta is nil"))
-		// this is a true new node not a rename/move
-		meta, err := getNodeMeta(event.Name)
+		info, err := os.Lstat(event.Name)
 		if err != nil {
-			return nil, errors.New(fmt.Sprintf("Failed to get inode for %q\n%v", event.Name, err.Error()))
+			return nil, err
 		}
+
+		meta, err := getNodeMeta(info)
+		if err != nil {
+			return nil, errors.New(fmt.Sprintf("Failed to get file meta for %q\n%v", event.Name, err.Error()))
+		}
+
 		if meta == nil {
 			return nil, nil
 		}
 
-		if meta.Type == FILE {
-			hash, err := fileHash(event.Name)
-			if err != nil {
-				return nil, err
-			}
-			fileEvent.Hash = &hash
+		state, err := getNodeState(relPath, event.Name, info)
+		if err != nil {
+			return nil, errors.New(fmt.Sprintf("Failed to get file state for %q\n%v", event.Name, err.Error()))
 		}
 
-		fileEvent.Node = &WatchedNode{
-			UUID:   uuid.New(),
-			Meta:   *meta,
-			Log:    []*FileEvent{},
-			Latest: nil,
+		fileEvent.State = state
+
+		watched, ok := watchedInodeMap[meta.Ino]
+		// handle renames
+		if ok {
+			// swamp name in map
+			watchedPathMap[fileEvent.State.Path] = watched
+			delete(watchedPathMap, watched.Latest.State.Path)
+
+			// update latest event w/ new info
+			logger.Info(fmt.Sprintf("Rename event | %q | %+v\n", fileEvent.State.Path, watched.UUID))
+
+			fileEvent.Type = "rename"
+			fileEvent.Watched = watched
+
+			// delete rename event from lookup
+			delete(renameEvents, fileEvent.Watched.Meta.Ino)
+		} else {
+			fileEvent.Watched = &WatchedNode{
+				UUID:   uuid.New(),
+				Meta:   meta,
+				Log:    []*FileEvent{},
+				Latest: nil,
+			}
 		}
 
 	case eventIs(fsnotify.Write, event):
@@ -204,21 +210,55 @@ func toFileEvent(event *fsnotify.Event) (*FileEvent, error) {
 
 		fileEvent.Type = "write"
 
-		if meta.Type == FILE {
-			hash, err := fileHash(event.Name)
-			if err != nil {
-				return nil, err
-			}
-			fileEvent.Hash = &hash
+		info, err := os.Lstat(event.Name)
+		if err != nil {
+			return nil, err
+		}
+
+		meta, err := getNodeMeta(info)
+		if err != nil {
+			return nil, errors.New(fmt.Sprintf("Failed to get file meta for %q\n%v", event.Name, err.Error()))
+		}
+
+		if meta == nil {
+			return nil, nil
+		}
+
+		state, err := getNodeState(relPath, event.Name, info)
+		if err != nil {
+			return nil, errors.New(fmt.Sprintf("Failed to get file state for %q\n%v", event.Name, err.Error()))
+		}
+
+		fileEvent.State = state
+
+		watched, nodeExists := watchedInodeMap[meta.Ino]
+		if !nodeExists {
+			logger.Error(fmt.Sprintf("Can't find watched for %q", relPath))
+			os.Exit(1)
+		}
+		if nodeExists {
+			fileEvent.Watched = watched
 		}
 
 	case eventIs(fsnotify.Remove, event):
 		logger.Info(fmt.Sprintf("Remove event: %q", relPath))
 		fileEvent.Type = "remove"
+		watched, nodeExists := watchedPathMap[relPath]
+		if !nodeExists {
+			logger.Error(fmt.Sprintf("Can't find watched for %q", relPath))
+			os.Exit(1)
+		}
+		fileEvent.Watched = watched
 
-	case eventIs(fsnotify.Rename, event):
-		logger.Info(fmt.Sprintf("Rename event: %q", relPath))
-		fileEvent.Type = "rename-signal"
+	// case eventIs(fsnotify.Rename, event):
+	// logger.Info(fmt.Sprintf("Rename event: %q", relPath))
+	// fileEvent.Type = "rename-signal"
+	// watched, nodeExists := watchedPathMap[relPath]
+	// if !nodeExists {
+	// 	logger.Error(fmt.Sprintf("Can't find watched for %q", relPath))
+	// 	os.Exit(1)
+	// }
+	// fileEvent.Watched = watched
 
 	default:
 		fileEvent = nil
@@ -227,33 +267,6 @@ func toFileEvent(event *fsnotify.Event) (*FileEvent, error) {
 
 	return fileEvent, nil
 }
-
-func handleRename(fileEvent *FileEvent) bool {
-	// if we find a rename event via hash then this is the final event of a rename/create pair
-	// to us a rename event is one event containing the new filename
-	if renameEvent, ok := renameEvents[fileEvent.Node.Meta.Ino]; ok {
-		// replace file history key w/ the new path
-		fileLog[fileEvent.Path] = renameEvent.Node
-		delete(fileLog, renameEvent.Path)
-
-		// update latest event w/ new info
-		logger.Info(fmt.Sprintf("Rename event | %q | %+v\n", fileEvent.Path, renameEvent.Node.UUID))
-		renameEvent.Type = "rename"
-		renameEvent.Hash = fileEvent.Hash
-		renameEvent.Path = fileEvent.Path
-
-		// delete rename event from lookup
-		delete(renameEvents, fileEvent.Node.Meta.Ino)
-
-		// our new event is the re-constructed rename event w/ new path
-		*fileEvent = *renameEvent // IMPORTANT
-
-		return true
-	}
-
-	return false
-}
-
 func getEventManagedDir(name string) (string, *ManagedDirectory) {
 	// TODO: at some point we need to disallow or handle nested managed directories
 	for dirPath, managedDir := range managedDirMap {
@@ -262,41 +275,4 @@ func getEventManagedDir(name string) (string, *ManagedDirectory) {
 		}
 	}
 	return "", nil
-}
-
-func getNodeMeta(path string) (*NodeMeta, error) {
-	info, err := os.Lstat(path)
-	if err != nil {
-		return nil, err
-	}
-
-	logger.Trace(fmt.Sprintf("FileMode for %q | %v", path, info.Mode()))
-	nodeType := getNodeType(info.Mode())
-
-	if nodeType < 1 {
-		// unsupported node
-		return nil, nil
-	}
-
-	stat, ok := info.Sys().(*syscall.Stat_t)
-	if !ok {
-		return nil, errors.ErrUnsupported
-	}
-
-	return &NodeMeta{
-		Type: nodeType,
-		Ino:  stat.Ino,
-	}, nil
-}
-
-func getNodeType(fileMode fs.FileMode) NodeType {
-	if fileMode.IsRegular() {
-		return FILE
-	}
-
-	if fileMode.IsDir() {
-		return DIR
-	}
-
-	return -1
 }
