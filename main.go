@@ -19,11 +19,20 @@ func main() {
 
 	logger.Info(fmt.Sprintf("Running w/ config:%v\n", config))
 
-	db, err := initDb(config.DSN)
+	managedMap, err := getManagedDirectoryFileStates(config.TopDir, config.ManagedDirectories)
 	if err != nil {
 		logger.Error(err.Error())
 		os.Exit(1) // TODO: gracefully handle these
 	}
+
+	watcher := initWatcher(config)
+	go runWatcher(watcher)
+
+	// db, err := initDb(config.DSN)
+	// if err != nil {
+	// 	logger.Error(err.Error())
+	// 	os.Exit(1) // TODO: gracefully handle these
+	// }
 
 	// results, err := db.GetFileStateByPath("syncfile.txt")
 	//
@@ -44,12 +53,9 @@ func main() {
 	// upsertFileStateDone := make(chan bool, 1)
 	// go upsertFileStates(upsertFileStateDone, fileStateChannel, db)
 
-	go runApi(config, db)
+	// go runApi(config, db)
 
-	// TODO: do something better than sleeping, use key event channel or something?
-	for {
-		time.Sleep(1 * time.Second)
-	}
+	<-make(chan bool)
 }
 
 func pollFileState(tick <-chan time.Time, done <-chan bool, states chan<- *FileState, config *NodeConfig) {

@@ -30,9 +30,9 @@ type FileState struct {
 	Timestamp time.Time
 }
 
-type ManagedMap map[string]map[string]FileState
+type ManagedMap map[string][]FileState
 
-func getManagedDirectoryFileStates(topdir string, managedDirs []ManagedDirectory) (map[string][]FileState, error) {
+func getManagedMap(topdir string, managedDirs []ManagedDirectory) (ManagedMap, error) {
 	managedMap := make(map[string][]FileState)
 
 	for _, managedDir := range managedDirs {
@@ -62,7 +62,7 @@ func getManagedFiles(topdir string, managedDir ManagedDirectory) ([]FileState, e
 			return errors.New(fmt.Sprintf("Failure when walking dir: %v\npath: %v\n%v\n", managedDir.Path, path, err))
 		}
 
-		localPath := relPath(path, fullDirPath)
+		localPath := getRelativePath(path, fullDirPath)
 
 		// we're only going to look at regular files for now
 		// TODO: via config, have the sync store sources for links that are below user home and manage those too
@@ -89,7 +89,6 @@ func getManagedFiles(topdir string, managedDir ManagedDirectory) ([]FileState, e
 			return err
 		}
 
-		// TODO: fix this up we shouldn't need to re-write this
 		filestate, err := getFileState(fullDirPath, path, fileinfo)
 		if err != nil {
 			return err
@@ -107,7 +106,7 @@ func getManagedFiles(topdir string, managedDir ManagedDirectory) ([]FileState, e
 	return managedFiles, nil
 }
 
-func relPath(fullPath string, relDir string) string {
+func getRelativePath(fullPath string, relDir string) string {
 	if !strings.HasSuffix(relDir, "/") {
 		relDir = fmt.Sprintf("%v/", relDir)
 	}
@@ -152,7 +151,7 @@ func getFileState(relDir string, path string, fileinfo fs.FileInfo) (*FileState,
 	// logger.Trace(fmt.Sprintf("filehash: %v, len: %d\n", filehash, len(filehash)))
 
 	return &FileState{
-		Path:      relPath(path, relDir),
+		Path:      getRelativePath(path, relDir),
 		Timestamp: time.Now(),
 		ModTime:   fileinfo.ModTime(),
 		Size:      fileinfo.Size(),

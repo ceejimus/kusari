@@ -110,7 +110,7 @@ func TestRelPathTrailingSlash(t *testing.T) {
 	relDir := "/path/to/reldir/"
 	fullPath := "/path/to/reldir/subdir/f.txt"
 
-	got := relPath(fullPath, relDir)
+	got := getRelativePath(fullPath, relDir)
 
 	if wanted == got {
 		return
@@ -125,7 +125,7 @@ func TestRelPathNoTrailingSlash(t *testing.T) {
 	relDir := "/path/to/reldir"
 	fullPath := "/path/to/reldir/subdir/f.txt"
 
-	got := relPath(fullPath, relDir)
+	got := getRelativePath(fullPath, relDir)
 
 	if wanted == got {
 		return
