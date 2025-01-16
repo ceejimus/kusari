@@ -85,18 +85,19 @@ func getManagedNodes(topdir string, managedDir ManagedDirectory) ([]NodeState, e
 
 		relPath := getRelativePath(path, fullDirPath)
 
-		if checkGlobs(exclGlobs, relPath, false) {
+		// for now we only check globs on files
+		isDir := d.Type().IsDir()
+		if !isDir && checkGlobs(exclGlobs, relPath, false) {
 			logger.Trace(fmt.Sprintf("Excluded - %v : %v", relPath, d))
 			return nil
 		}
 
-		if !checkGlobs(inclGlobs, relPath, true) {
+		if !isDir && !checkGlobs(inclGlobs, relPath, true) {
 			logger.Trace(fmt.Sprintf("Not included - %v : %v", relPath, d))
 			return nil
 		}
 
 		// we're only going to look at regular files and regular dirs
-		// TODO: via config, have the sync store sources for links that are below user home and manage those too
 		// TODO: implement our own directory recursion?
 		if !d.Type().IsRegular() && !d.Type().IsDir() {
 			logger.Trace(fmt.Sprintf("SKIPPING - %v : %v", relPath, d))
@@ -110,6 +111,7 @@ func getManagedNodes(topdir string, managedDir ManagedDirectory) ([]NodeState, e
 			return err
 		}
 
+		logger.Trace(fmt.Sprintf("%q", relPath))
 		filestate, err := getNodeState(relPath, path, fileinfo)
 		if err != nil {
 			return err

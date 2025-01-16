@@ -19,14 +19,21 @@ func main() {
 
 	logger.Info(fmt.Sprintf("Running w/ config:%v\n", config))
 
-	// managedMap, err := getManagedMap(config.TopDir, config.ManagedDirectories)
-	// if err != nil {
-	// 	logger.Error(err.Error())
-	// 	os.Exit(1) // TODO: gracefully handle these
-	// }
+	managedMap, err := getManagedMap(config.TopDir, config.ManagedDirectories)
+	if err != nil {
+		logger.Error(err.Error())
+		os.Exit(1) // TODO: gracefully handle these
+	}
 
-	watcher := initWatcher(config)
-	go runWatcher(watcher)
+	for k, vs := range managedMap {
+		logger.Info(fmt.Sprintln(k))
+		for _, v := range vs {
+			logger.Info(fmt.Sprintf("%+v", v))
+		}
+	}
+
+	// watcher := initWatcher(config)
+	// go runWatcher(watcher)
 
 	// db, err := initDb(config.DSN)
 	// if err != nil {

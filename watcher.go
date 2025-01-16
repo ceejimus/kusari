@@ -25,7 +25,6 @@ type WatchedNode struct {
 	Log    []*FileEvent // events for this file
 	Latest *FileEvent   // pointer to most recent event
 	Meta   *NodeMeta    // node metadata
-	// Node   Node         // actual node
 }
 
 // for create / write we can (and should) find watched via inode
@@ -34,12 +33,8 @@ type WatchedInodeMap map[uint64]*WatchedNode
 // for rename / remove we don't have an inode anymore and can find by path
 type WatchedPathMap map[string]*WatchedNode
 
-type RenameEvents map[uint64]*FileEvent // map nodes that got rename events
-
 var watchedInodeMap = make(WatchedInodeMap)
 var watchedPathMap = make(WatchedPathMap)
-var renameEvents = make(RenameEvents) // TODO clean stale entries
-
 var managedDirMap = make(map[string]ManagedDirectory)
 
 func initWatcher(config *NodeConfig) *fsnotify.Watcher {
@@ -84,13 +79,6 @@ func runWatcher(watcher *fsnotify.Watcher) {
 			logger.Info(fmt.Sprintf("Error received:\n%v", err.Error()))
 		}
 	}
-}
-
-// func handleNotifyEvent(event fsnotify.Event) (string, error) {
-// }
-
-func eventIs(op fsnotify.Op, event *fsnotify.Event) bool {
-	return event.Op&op == op
 }
 
 func handleEvent(event *fsnotify.Event) error {
@@ -142,7 +130,7 @@ func handleEvent(event *fsnotify.Event) error {
 
 // translate fsnotify.Event to local type incl. file hash
 func toFileEvent(event *fsnotify.Event) (*FileEvent, error) {
-	dirPath, dir := getEventManagedDir(event.Name)
+	dirPath, dir := getManagedDirFromFullPath(event.Name)
 	if dirPath == "" || dir == nil {
 		return nil, errors.New(fmt.Sprintf("Failed to get managed dir for event: %v", event)) // if this ever happens something funky is probably going on
 	}
@@ -193,9 +181,6 @@ func toFileEvent(event *fsnotify.Event) (*FileEvent, error) {
 
 			fileEvent.Type = "rename"
 			fileEvent.Watched = watched
-
-			// delete rename event from lookup
-			delete(renameEvents, fileEvent.Watched.Meta.Ino)
 		} else {
 			fileEvent.Watched = &WatchedNode{
 				UUID:   uuid.New(),
@@ -267,7 +252,12 @@ func toFileEvent(event *fsnotify.Event) (*FileEvent, error) {
 
 	return fileEvent, nil
 }
-func getEventManagedDir(name string) (string, *ManagedDirectory) {
+
+func eventIs(op fsnotify.Op, event *fsnotify.Event) bool {
+	return event.Op&op == op
+}
+
+func getManagedDirFromFullPath(name string) (string, *ManagedDirectory) {
 	// TODO: at some point we need to disallow or handle nested managed directories
 	for dirPath, managedDir := range managedDirMap {
 		if strings.HasPrefix(name, dirPath) {

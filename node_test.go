@@ -174,7 +174,7 @@ func helperTestGetManagedFiles(t *testing.T, tmpDir TmpDir, include []string, ex
 		Include: include,
 		Exclude: exclude,
 	}
-	managedFiles, err := getManagedFiles(topdir, managedDir)
+	managedFiles, err := getManagedNodes(topdir, managedDir)
 
 	got := make([]string, len(managedFiles))
 
