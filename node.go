@@ -24,37 +24,101 @@ const (
 	DIR
 )
 
-// static metadata about a node
-type NodeMeta struct {
-	Type NodeType // file, dir, link ,etc
-	Ino  uint64   // inode
-}
-
-// TODO: think about what goes in NodeMeta
-// dynamic node state state
-type NodeState struct {
-	Path    string
-	Hash    *string
-	Size    int64
-	ModTime time.Time
-}
-
-// TODO make sure this stays sorted
-type Node struct {
-	Meta  NodeMeta  // node metadata
-	State NodeState // node state
-}
-
 type ManagedDirectory struct {
 	Path    string   `yaml:"path"`
 	Include []string `yaml:"incl"`
 	Exclude []string `yaml:"excl"`
 }
 
-type ManagedMap map[string][]NodeState
+type ManagedMap map[string][]Node
+
+type NodeState struct {
+	Path    string
+	ModTime time.Time
+	Hash    string
+	Size    uint64
+}
+
+type Node struct {
+	info fs.FileInfo
+	Path string
+}
+
+func (n *Node) Type() NodeType {
+	// extract type from info and set on type
+	mode := n.info.Mode()
+	if mode.IsRegular() {
+		return FILE
+	} else if mode.IsDir() {
+		return DIR
+	}
+	return -1
+}
+
+func (n *Node) Ino() uint64 {
+	// extract inode from stat
+	stat, ok := n.info.Sys().(*syscall.Stat_t)
+	if ok {
+		return stat.Ino
+	}
+	return 0
+}
+
+func (n *Node) Size() uint64 {
+	return uint64(n.info.Size())
+}
+
+func (n *Node) Modtime() time.Time {
+	return n.info.ModTime()
+}
+
+func (n *Node) Hash() (string, error) {
+	if n.Type() != FILE {
+		return "", errors.ErrUnsupported
+	}
+
+	hash, err := fileHash(n.Path)
+	if err != nil {
+		return "", err
+	}
+
+	return hash, nil
+}
+
+func (n *Node) State() NodeState {
+	hash, _ := n.Hash()
+	return NodeState{
+		Path:    n.Path,
+		ModTime: n.Modtime(),
+		Hash:    hash,
+		Size:    n.Size(),
+	}
+}
+
+func (n *Node) String() string {
+	var b strings.Builder
+	nodeTypeStr := "\\"
+	if n.Type() == FILE {
+		nodeTypeStr = "-"
+	} else if n.Type() == DIR {
+		nodeTypeStr = "d"
+	}
+	b.WriteString(fmt.Sprintf("(%.8d) ", n.Ino()))
+	b.WriteString(fmt.Sprintf("%v ", nodeTypeStr))
+	b.WriteString(fmt.Sprintf("%.8d", n.Size()))
+	//	01/02 03:04:05PM '06 -0700
+	//	Mon Jan 2 15:04:05 MST 2006
+	b.WriteString(fmt.Sprintf(" %s", n.Modtime().Format("2006-01-02 15:04:05 MST")))
+	b.WriteString(fmt.Sprintf(" %s", n.info.Name()))
+	hash, err := n.Hash()
+	if err == nil {
+		b.WriteString(fmt.Sprintf(" |%s|", hash))
+	}
+	return b.String()
+}
 
 func getManagedMap(topdir string, managedDirs []ManagedDirectory) (ManagedMap, error) {
-	managedMap := make(map[string][]NodeState)
+	managedMap := make(map[string][]Node)
 
 	for _, managedDir := range managedDirs {
 		managedFiles, err := getManagedNodes(topdir, managedDir)
@@ -68,8 +132,8 @@ func getManagedMap(topdir string, managedDirs []ManagedDirectory) (ManagedMap, e
 	return managedMap, nil
 }
 
-func getManagedNodes(topdir string, managedDir ManagedDirectory) ([]NodeState, error) {
-	managedFiles := make([]NodeState, 0)
+func getManagedNodes(topdir string, managedDir ManagedDirectory) ([]Node, error) {
+	managedFiles := make([]Node, 0)
 
 	inclGlobs := mapToGlobs(managedDir.Include)
 	exclGlobs := mapToGlobs(managedDir.Exclude)
@@ -81,6 +145,10 @@ func getManagedNodes(topdir string, managedDir ManagedDirectory) ([]NodeState, e
 
 		if err != nil {
 			return errors.New(fmt.Sprintf("Failure when walking dir: %v\npath: %v\n%v\n", managedDir.Path, path, err))
+		}
+
+		if path == fullDirPath {
+			return nil
 		}
 
 		relPath := getRelativePath(path, fullDirPath)
@@ -106,18 +174,13 @@ func getManagedNodes(topdir string, managedDir ManagedDirectory) ([]NodeState, e
 
 		logger.Trace(fmt.Sprintf("Adding - %v : %v", relPath, d))
 
-		fileinfo, err := d.Info()
-		if err != nil {
-			return err
-		}
-
 		logger.Trace(fmt.Sprintf("%q", relPath))
-		filestate, err := getNodeState(relPath, path, fileinfo)
+		node, err := newNode(path)
 		if err != nil {
 			return err
 		}
 
-		managedFiles = append(managedFiles, *filestate)
+		managedFiles = append(managedFiles, *node)
 
 		return nil
 	})
@@ -157,36 +220,6 @@ func checkGlobs(globs []glob.Glob, input string, onEmpty bool) bool {
 
 	return false
 }
-
-func getNodeState(relPath string, path string, info fs.FileInfo) (*NodeState, error) {
-	var hash *string
-
-	size := int64(0)
-
-	meta, err := getNodeMeta(info)
-
-	if meta.Type == FILE {
-		filehash, err := fileHash(path)
-		if err != nil {
-			return nil, errors.New(fmt.Sprintf("Failed to hash file %q\n%v\n", path, err.Error()))
-		}
-		hash = &filehash
-
-		size = info.Size()
-	}
-
-	if err != nil {
-		return nil, err
-	}
-
-	return &NodeState{
-		Path:    relPath,
-		Size:    size,
-		Hash:    hash,
-		ModTime: info.ModTime(),
-	}, nil
-}
-
 func fileHash(path string) (string, error) {
 	file, err := os.Open(path)
 	if err != nil {
@@ -202,34 +235,11 @@ func fileHash(path string) (string, error) {
 	return hex.EncodeToString(hash.Sum(nil)), nil
 }
 
-func getNodeMeta(info fs.FileInfo) (*NodeMeta, error) {
-	// logger.Trace(fmt.Sprintf("FileMode for %q | %v", path, info.Mode()))
-	nodeType := getNodeType(info.Mode())
-
-	if nodeType < 1 {
-		// unsupported node
-		return nil, nil
+func newNode(path string) (*Node, error) {
+	info, err := os.Lstat(path)
+	if err != nil {
+		return nil, err
 	}
 
-	stat, ok := info.Sys().(*syscall.Stat_t)
-	if !ok {
-		return nil, errors.ErrUnsupported
-	}
-
-	return &NodeMeta{
-		Type: nodeType,
-		Ino:  stat.Ino,
-	}, nil
-}
-
-func getNodeType(fileMode fs.FileMode) NodeType {
-	if fileMode.IsRegular() {
-		return FILE
-	}
-
-	if fileMode.IsDir() {
-		return DIR
-	}
-
-	return -1
+	return &Node{info: info, Path: path}, nil
 }

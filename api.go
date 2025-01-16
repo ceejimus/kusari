@@ -5,7 +5,6 @@ import (
 	"fmt"
 	"io"
 	"net/http"
-	"os"
 	"path/filepath"
 )
 
@@ -16,7 +15,7 @@ type SyncRequest struct {
 type SyncFileState struct {
 	Path      string `json:"path"`
 	Hash      string `json:"hash"`
-	Size      int64  `json:"size"`
+	Size      uint64 `json:"size"`
 	ModTime   int64  `json:"modtime"`
 	Timestamp int64  `json:"timestamp"`
 }
@@ -24,7 +23,7 @@ type SyncFileState struct {
 func (sfs *SyncFileState) ToFileState() *NodeState {
 	return &NodeState{
 		Path:    sfs.Path,
-		Hash:    &sfs.Hash,
+		Hash:    sfs.Hash,
 		Size:    sfs.Size,
 		ModTime: FromSQLTime(sfs.ModTime),
 		// Timestamp: FromSQLTime(sfs.Timestamp),
@@ -59,7 +58,7 @@ func (h *syncHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	relDir := filepath.Join(h.config.TopDir, dirPath)
+	// relDir := filepath.Join(h.config.TopDir, dirPath)
 	var managedDir *ManagedDirectory
 
 	for _, d := range h.config.ManagedDirectories {
@@ -104,18 +103,14 @@ func (h *syncHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		relPath := filepath.Join(dirPath, filePath)
 		fullPath := filepath.Join(h.config.TopDir, relPath)
 		logger.Info(fullPath)
-		fileinfo, err := os.Lstat(fullPath)
-		if err != nil {
-			writeError(w, http.StatusBadRequest, map[string]string{"message": fmt.Sprintf("No fileinfo for %q\n%v\n", fullPath, err.Error())})
-			return
-		}
-		fs, err := getNodeState(relDir, fullPath, fileinfo)
+		node, err := newNode(fullPath)
 		if err != nil {
 			writeError(w, http.StatusBadRequest, map[string]string{"message": fmt.Sprintf("Couldn't get host FileState for %q\n%v\n", relPath, err.Error())})
 			return
 		}
+		fs := node.State()
 		logger.Info(fmt.Sprintf("Local FileState for %q\n%+v\n", fullPath, fs))
-		err = h.db.UpsertFileState(fs)
+		err = h.db.UpsertFileState(&fs)
 		if err != nil {
 			writeError(w, http.StatusInternalServerError, map[string]string{"message": fmt.Sprintf("Couldn't update FileState for %q\n%v\n", filePath, err.Error())})
 			return

@@ -3,7 +3,6 @@ package main
 import (
 	"fmt"
 	"os"
-	"time"
 )
 
 var logger Logger
@@ -25,15 +24,15 @@ func main() {
 		os.Exit(1) // TODO: gracefully handle these
 	}
 
-	for k, vs := range managedMap {
-		logger.Info(fmt.Sprintln(k))
-		for _, v := range vs {
-			logger.Info(fmt.Sprintf("%+v", v))
+	for dir, nodes := range managedMap {
+		logger.Info(fmt.Sprintln(dir))
+		for _, node := range nodes {
+			logger.Info(fmt.Sprint(node.String()))
 		}
 	}
 
-	// watcher := initWatcher(config)
-	// go runWatcher(watcher)
+	watcher := initWatcher(config, managedMap)
+	go runWatcher(watcher)
 
 	// db, err := initDb(config.DSN)
 	// if err != nil {
@@ -65,56 +64,56 @@ func main() {
 	<-make(chan bool)
 }
 
-func pollFileState(tick <-chan time.Time, done <-chan bool, states chan<- *NodeState, config *NodeConfig) {
-	run := func() {
-		managedMap, err := getManagedMap(config.TopDir, config.ManagedDirectories)
-		if err != nil {
-			logger.Error(err.Error())
-			os.Exit(1) // TODO: gracefully handle these
-		}
-
-		for managedDir, managedFiles := range managedMap {
-			logger.Debug(fmt.Sprintf("ManagedDir: %v\n", managedDir))
-			for _, fileState := range managedFiles {
-				states <- &fileState
-			}
-		}
-	}
-
-	ready := make(chan bool, 1)
-	ready <- true // so we start
-	for {
-		select {
-		case <-done:
-			return
-		case _ = <-tick:
-			select {
-			case _ = <-ready:
-				go func() {
-					run()
-					ready <- true
-				}()
-			default:
-				logger.Info(fmt.Sprintln("FileState poller congestion..."))
-			}
-		}
-	}
-}
-
-// TODO: batching
-// TODO: gracefully handle errors
-func upsertFileStates(done <-chan bool, states <-chan *NodeState, db *DB) {
-	for {
-		select {
-		case <-done:
-			return
-		case fileState := <-states:
-			logger.Trace(fmt.Sprintf("Upserting FileState: %+v\n", fileState))
-			err := db.UpsertFileState(fileState)
-			if err != nil {
-				logger.Error(err.Error())
-				os.Exit(1)
-			}
-		}
-	}
-}
+// func pollFileState(tick <-chan time.Time, done <-chan bool, states chan<- *NodeState, config *NodeConfig) {
+// 	run := func() {
+// 		managedMap, err := getManagedMap(config.TopDir, config.ManagedDirectories)
+// 		if err != nil {
+// 			logger.Error(err.Error())
+// 			os.Exit(1) // TODO: gracefully handle these
+// 		}
+//
+// 		for managedDir, managedFiles := range managedMap {
+// 			logger.Debug(fmt.Sprintf("ManagedDir: %v\n", managedDir))
+// 			for _, fileState := range managedFiles {
+// 				states <- &fileState
+// 			}
+// 		}
+// 	}
+//
+// 	ready := make(chan bool, 1)
+// 	ready <- true // so we start
+// 	for {
+// 		select {
+// 		case <-done:
+// 			return
+// 		case _ = <-tick:
+// 			select {
+// 			case _ = <-ready:
+// 				go func() {
+// 					run()
+// 					ready <- true
+// 				}()
+// 			default:
+// 				logger.Info(fmt.Sprintln("FileState poller congestion..."))
+// 			}
+// 		}
+// 	}
+// }
+//
+// // TODO: batching
+// // TODO: gracefully handle errors
+// func upsertFileStates(done <-chan bool, states <-chan *NodeState, db *DB) {
+// 	for {
+// 		select {
+// 		case <-done:
+// 			return
+// 		case fileState := <-states:
+// 			logger.Trace(fmt.Sprintf("Upserting FileState: %+v\n", fileState))
+// 			err := db.UpsertFileState(fileState)
+// 			if err != nil {
+// 				logger.Error(err.Error())
+// 				os.Exit(1)
+// 			}
+// 		}
+// 	}
+// }

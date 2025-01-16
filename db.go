@@ -42,10 +42,10 @@ func (fs *NodeState) ToScriptArgs() map[string]any {
 
 func (fs NodeState) FromSQLiteStmt(stmt *sqlite.Stmt) (*NodeState, error) {
 	hash := stmt.GetText("hash")
-	size := stmt.GetInt64("size")
+	size := uint64(stmt.GetInt64("size"))
 	return &NodeState{
 		Path:    stmt.GetText("path"),
-		Hash:    &hash,
+		Hash:    hash,
 		Size:    size,
 		ModTime: FromSQLTime(stmt.GetInt64("modtime")),
 		// Timestamp: FromSQLTime(stmt.GetInt64("timestamp")),
