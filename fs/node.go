@@ -22,7 +22,7 @@ const (
 type NodeState struct {
 	Path    string
 	ModTime time.Time
-	Hash    string
+	Hash    *string
 	Size    uint64
 }
 
@@ -59,17 +59,17 @@ func (n *Node) ModTime() time.Time {
 	return n.info.ModTime()
 }
 
-func (n *Node) Hash() (string, error) {
+func (n *Node) Hash() (*string, error) {
 	if n.Type() != FILE {
-		return "", errors.ErrUnsupported
+		return nil, errors.ErrUnsupported
 	}
 
 	hash, err := FileHash(n.Path)
 	if err != nil {
-		return "", err
+		return nil, err
 	}
 
-	return hash, nil
+	return &hash, nil
 }
 
 func (n *Node) State() NodeState {
@@ -99,7 +99,7 @@ func (n *Node) String() string {
 	b.WriteString(fmt.Sprintf(" %s", n.info.Name()))
 	hash, err := n.Hash()
 	if err == nil {
-		b.WriteString(fmt.Sprintf(" |%s|", hash))
+		b.WriteString(fmt.Sprintf(" |%s|", *hash))
 	}
 	return b.String()
 }
@@ -111,7 +111,9 @@ func (n *NodeState) String() string {
 	//	Mon Jan 2 15:04:05 MST 2006
 	b.WriteString(fmt.Sprintf(" %s", n.ModTime.Format("2006-01-02 15:04:05 MST")))
 	b.WriteString(fmt.Sprintf(" %s", filepath.Base(n.Path)))
-	b.WriteString(fmt.Sprintf(" |%s|", n.Hash))
+	if n.Hash != nil {
+		b.WriteString(fmt.Sprintf(" |%s|", *n.Hash))
+	}
 	return b.String()
 }
 

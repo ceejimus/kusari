@@ -22,6 +22,8 @@ func main() {
 
 	logger.Info(fmt.Sprintf("Running w/ config:%v\n", config))
 
+	store := syncd.NewMemStore()
+
 	managedMap, err := syncd.GetManagedMap(config.TopDir, config.ManagedDirectories)
 	if err != nil {
 		logger.Error(err.Error())
@@ -35,7 +37,7 @@ func main() {
 		}
 	}
 
-	watcher := syncd.InitWatcher(config.TopDir, config.ManagedDirectories, managedMap)
+	watcher := syncd.InitWatcher(config.TopDir, config.ManagedDirectories, managedMap, store)
 	go syncd.RunWatcher(watcher)
 
 	// db, err := initDb(config.DSN)
