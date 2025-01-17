@@ -68,7 +68,7 @@ func (n *Node) Size() uint64 {
 	return uint64(n.info.Size())
 }
 
-func (n *Node) Modtime() time.Time {
+func (n *Node) ModTime() time.Time {
 	return n.info.ModTime()
 }
 
@@ -89,7 +89,7 @@ func (n *Node) State() NodeState {
 	hash, _ := n.Hash()
 	return NodeState{
 		Path:    n.Path,
-		ModTime: n.Modtime(),
+		ModTime: n.ModTime(),
 		Hash:    hash,
 		Size:    n.Size(),
 	}
@@ -108,12 +108,23 @@ func (n *Node) String() string {
 	b.WriteString(fmt.Sprintf("%.8d", n.Size()))
 	//	01/02 03:04:05PM '06 -0700
 	//	Mon Jan 2 15:04:05 MST 2006
-	b.WriteString(fmt.Sprintf(" %s", n.Modtime().Format("2006-01-02 15:04:05 MST")))
+	b.WriteString(fmt.Sprintf(" %s", n.ModTime().Format("2006-01-02 15:04:05 MST")))
 	b.WriteString(fmt.Sprintf(" %s", n.info.Name()))
 	hash, err := n.Hash()
 	if err == nil {
 		b.WriteString(fmt.Sprintf(" |%s|", hash))
 	}
+	return b.String()
+}
+
+func (n *NodeState) String() string {
+	var b strings.Builder
+	b.WriteString(fmt.Sprintf("%.8d", n.Size))
+	//	01/02 03:04:05PM '06 -0700
+	//	Mon Jan 2 15:04:05 MST 2006
+	b.WriteString(fmt.Sprintf(" %s", n.ModTime.Format("2006-01-02 15:04:05 MST")))
+	b.WriteString(fmt.Sprintf(" %s", filepath.Base(n.Path)))
+	b.WriteString(fmt.Sprintf(" |%s|", n.Hash))
 	return b.String()
 }
 

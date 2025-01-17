@@ -4,7 +4,6 @@ import (
 	"errors"
 	"fmt"
 	"io/fs"
-	"os"
 	"path/filepath"
 	"strings"
 	"time"
@@ -15,19 +14,20 @@ import (
 
 // TODO: make "enum"
 type FileEvent struct {
-	Name      string       // the name of the underlying event (full path)
-	Type      string       // "create", "modify", "delete", "rename"
-	Timestamp time.Time    // time event processed
-	NodeType  NodeType     // the type of node
-	State     *NodeState   // node state
-	Watched   *WatchedNode // pointer to parent watched node // TODO: remove
+	Name      string    // the name of the underlying event (full path)
+	Type      string    // "create", "modify", "delete", "rename"
+	Timestamp time.Time // time event processed
+	// NodeType  NodeType   // the type of node
+	State *NodeState // node state
+	Next  *FileEvent // next event for this node
+	Prev  *FileEvent // previous event for this node
 }
 
 type WatchedNode struct {
-	UUID   uuid.UUID    // id
-	Log    []*FileEvent // events for this file
-	Latest *FileEvent   // pointer to most recent event
-	Node   *Node        // node metadata
+	UUID uuid.UUID  // id
+	Head *FileEvent // head of list
+	Tail *FileEvent // pointer to most recent event
+	Node *Node      // the node we're watching
 }
 
 // for create / write we can (and should) find watched via inode
@@ -84,18 +84,17 @@ func pseudoWatched(node *Node) *WatchedNode {
 	fileEvent := FileEvent{
 		Name:      node.Path,
 		Type:      "create",
-		NodeType:  node.Type(),
 		Timestamp: time.Now(),
 		State:     &state,
-		Watched:   nil,
+		// Watched:   nil,
 	}
 	watched := WatchedNode{
-		UUID:   uuid.New(),
-		Log:    []*FileEvent{&fileEvent},
-		Latest: &fileEvent,
-		Node:   node,
+		UUID: uuid.New(),
+		Head: &fileEvent,
+		Tail: &fileEvent,
+		Node: node,
 	}
-	fileEvent.Watched = &watched
+	// fileEvent.Watched = &watched
 	return &watched
 }
 
@@ -107,7 +106,7 @@ func runWatcher(watcher *fsnotify.Watcher) {
 			if !ok {
 				return
 			}
-			fileEvent, err := handleEvent(&event)
+			fileEvent, newDir, err := handleEvent(&event)
 			if err != nil {
 				logger.Error(fmt.Sprintf("Failed to handle fsnotify event:\n%v\n", err.Error()))
 			}
@@ -116,7 +115,7 @@ func runWatcher(watcher *fsnotify.Watcher) {
 				continue
 			}
 
-			if fileEvent.Type == "create" && fileEvent.NodeType == DIR {
+			if newDir {
 				logger.Trace(fmt.Sprintf("Watching new dir: %q", fileEvent.Name))
 				err := recursiveWatcherAdd(watcher, fileEvent.Name)
 				if err != nil {
@@ -149,154 +148,222 @@ func recursiveWatcherAdd(watcher *fsnotify.Watcher, path string) error {
 	return err
 }
 
-func handleEvent(event *fsnotify.Event) (*FileEvent, error) {
+func handleEvent(event *fsnotify.Event) (*FileEvent, bool, error) {
 	// transform fsnotify event into local node event
-	fileEvent, err := toFileEvent(event)
-	if err != nil {
-		return nil, err
-	}
+	fileEvent := parseEvent(event)
 	if fileEvent == nil {
-		return nil, nil
+		return nil, false, nil
 	}
-	// add new watched nodes to maps
-	if fileEvent.Type == "create" {
+	// lookup watched log for this event
+	watched, node, err := lkpWatched(fileEvent)
+	if err != nil {
+		return nil, false, errors.New(fmt.Sprintf("Failed to find Watched for event:  %v", event))
+	}
+	// ignore unsupported types for now
+	if node.Type() < 1 {
+		return nil, false, errors.ErrUnsupported
+	}
+	// link events together and create new WatchedNode if necessary
+	newWatched := linkEvents(fileEvent, watched, node)
+	if newWatched != nil {
 		// TODO: make sure this works w/ new rename/recreate/reuse paradigm
-		watchedInodeMap[fileEvent.Watched.Node.Ino()] = fileEvent.Watched
-		watchedPathMap[fileEvent.Name] = fileEvent.Watched
+		watchedInodeMap[newWatched.Node.Ino()] = newWatched
+		watchedPathMap[newWatched.Node.Path] = newWatched
 	}
-	// update watched file event log
-	watched := fileEvent.Watched
-	watched.Latest = fileEvent
-	watched.Log = append(watched.Log, fileEvent)
-	watched.Latest = fileEvent
-	// TODO: remove
-	// for debug purposes
+	setNodeState(fileEvent, node)
+
 	if fileEvent.Type == "remove" {
-		for i, e := range watched.Log {
-			logger.Info(fmt.Sprintf("%d - %p - %v %q\n", i, e, e.Type, e.Name))
+		for e := watched.Head; e != nil; e = e.Next {
+			logger.Info(fmt.Sprintf("%p - %v %s\n", e, e.Type, e.State))
 		}
 	}
 
-	return fileEvent, nil
+	return fileEvent, fileEvent.Type == "create" && node.Type() == DIR, nil
 }
 
-// translate fsnotify.Event to local type incl. file hash
-func toFileEvent(event *fsnotify.Event) (*FileEvent, error) {
-	// match event name (full path to file) to managed directory
-	dirPath, dir := getManagedDirFromFullPath(event.Name)
-	if dirPath == "" || dir == nil {
-		return nil, errors.New(fmt.Sprintf("Failed to get managed dir for event: %v", event)) // if this ever happens something funky is probably going on
-	}
-	// get relative path of file
-	relPath := getRelativePath(event.Name, dirPath)
+func parseEvent(event *fsnotify.Event) *FileEvent {
 	// init fileEvent
-	fileEvent := &FileEvent{
+	fileEvent := FileEvent{
 		Name:      event.Name,
 		Timestamp: time.Now(),
 	}
-	// do the magic sauce
+	// set internal type
 	switch {
-	// fsnotify.Create events occur for new inodes and renamed inodes
-	// for renamed inodes the create event occurs AFTER a rename event
-	// since we're tracking at the inode level the rename event is kinda useless
 	case eventIs(fsnotify.Create, event):
-		logger.Trace(fmt.Sprintf("Create event: %q", relPath))
-		// make new node
-		node, err := newNode(event.Name)
-		if err != nil {
-			return nil, err
-		}
-		// ignore unsupported types for now
-		if node.Type() < 1 {
-			return nil, nil
-		}
-		// set fileEvent props
 		fileEvent.Type = "create"
-		fileEvent.NodeType = node.Type()
-		nodeState := node.State()
-		fileEvent.State = &nodeState
-		// are we already watching this node?
-		logger.Trace(fmt.Sprintf("inode: %d", node.Ino()))
-		watched, ok := watchedInodeMap[node.Ino()]
-		if ok { // this is either a rename | recreate | reuse (ino)
-			if watched.Latest.Type == "rename" { // rename
-				// swamp name in map
-				// shrek is love
-				watchedPathMap[fileEvent.Name] = watched
-				delete(watchedPathMap, watched.Latest.Name)
-				// update latest event w/ new info
-				logger.Info(fmt.Sprintf("Rename event | %q | %+v\n", fileEvent.State.Path, watched.UUID))
-			}
-			watched.Node = node
-			fileEvent.Watched = watched
-		} else { // then this is a new inode
-			fileEvent.Watched = &WatchedNode{
-				UUID:   uuid.New(),
-				Node:   node,
-				Log:    []*FileEvent{}, // this file event will get added by caller
-				Latest: nil,
-			}
-		}
-	// write events occur when you modify the contents of a file
-	// writes may occur one after another // TODO: handle write event "streams"
 	case eventIs(fsnotify.Write, event):
-		logger.Trace(fmt.Sprintf("Write event: %q", relPath))
-		// make new node
-		node, err := newNode(event.Name)
-		// ignore unsupported types for now
-		if err != nil {
-			return nil, err
-		}
-		// set fileEvent props
 		fileEvent.Type = "write"
-		fileEvent.NodeType = node.Type()
-		nodeState := node.State()
-		fileEvent.State = &nodeState
-		// we should be watching this node
-		logger.Trace(fmt.Sprintf("inode: %d", node.Ino()))
-		watched, nodeExists := watchedInodeMap[node.Ino()]
-		if !nodeExists {
-			logger.Error(fmt.Sprintf("Can't find watched for %q", relPath))
-			os.Exit(1)
-		}
-
-		watched.Node = node
-		fileEvent.Watched = watched
-	// fsnotify.Remove events occur on (you guessed it)
 	case eventIs(fsnotify.Remove, event):
-		logger.Trace(fmt.Sprintf("Remove event: %q", relPath))
-		// we should be watching this node
-		watched, nodeExists := watchedPathMap[event.Name]
-		if !nodeExists {
-			logger.Error(fmt.Sprintf("Can't find watched for %q", relPath))
-			os.Exit(1)
-		}
-		// set fileEvent props
 		fileEvent.Type = "remove"
-		fileEvent.NodeType = watched.Node.Type()
-		fileEvent.Watched = watched
 	case eventIs(fsnotify.Rename, event):
-		logger.Info(fmt.Sprintf("Rename event: %q", relPath))
-		watched, nodeExists := watchedPathMap[event.Name]
-		if !nodeExists {
-			logger.Error(fmt.Sprintf("Can't find watched for %q", relPath))
-			os.Exit(1)
-		}
-		// set fileEvent props
 		fileEvent.Type = "rename"
-		fileEvent.NodeType = watched.Node.Type()
-		fileEvent.Watched = watched
-	// nil the fileEvent pointer and trace it for unhandled events
 	default:
-		logger.Trace(fmt.Sprintf("%v event: %q", event.Op, relPath))
-		fileEvent = nil
+		return nil
 	}
 
-	return fileEvent, nil
+	return &fileEvent
 }
+
+func setNodeState(fileEvent *FileEvent, node *Node) {
+	// match event name (full path to file) to managed directory
+	// dirPath, dir := getManagedDirFromFullPath(fileEvent.Name)
+	// if dirPath == "" || dir == nil {
+	// 	return nil, errors.New(fmt.Sprintf("Failed to get managed dir for event: %v", fileEvent)) // if this ever happens something funky is probably going on
+	// }
+	// get relative path of file
+	// relPath := getRelativePath(fileEvent.Name, dirPath)
+
+	switch fileEvent.Type {
+	case "create":
+		logger.Trace(fmt.Sprintf("Create event: %s", node.String()))
+		// set fileEvent props
+		nodeState := node.State()
+		fileEvent.State = &nodeState
+		// set node type
+		// fileEvent.NodeType = node.Type()
+	case "write":
+		logger.Trace(fmt.Sprintf("Write event: %s", node.String()))
+		// set fileEvent props
+		nodeState := node.State()
+		fileEvent.State = &nodeState
+		// set node type
+		// fileEvent.NodeType = node.Type()
+	default:
+	}
+}
+
+func linkEvents(fileEvent *FileEvent, watched *WatchedNode, node *Node) *WatchedNode {
+	if fileEvent.Type == "create" {
+		// REMEMBER: we find this watched by inode lookup
+		if watched != nil { // this is either a rename, a recreate, or a reuse of inode
+			if watched.Tail.Type == "rename" { // rename
+				// swamp name in map // shrek is love
+				watchedPathMap[fileEvent.Name] = watched
+				delete(watchedPathMap, watched.Tail.Name)
+			} else if watched.Tail.Type != "remove" || watched.Tail.Name != fileEvent.Name { // reuse of inode
+				return &WatchedNode{
+					UUID: uuid.New(),
+					Head: fileEvent,
+					Tail: fileEvent,
+					Node: node,
+				}
+			}
+		} else {
+			return &WatchedNode{
+				UUID: uuid.New(),
+				Head: fileEvent,
+				Tail: fileEvent,
+				Node: node,
+			}
+		}
+	}
+
+	watched.Tail.Next = fileEvent // tail is now this event
+	fileEvent.Prev = watched.Tail // event prior to this on was previous tail
+	watched.Tail = fileEvent
+
+	if node != nil {
+		watched.Node = node
+	}
+
+	return nil
+}
+
+// func
+// 	switch fileEvent.Type {
+// 	case "create":
+// 		logger.Trace(fmt.Sprintf("Create event: %s", node.String()))
+// 		// set fileEvent props
+// 		nodeState := node.State()
+// 		fileEvent.State = &nodeState
+// 		// set node type
+// 		fileEvent.NodeType = node.Type()
+// 	case "write":
+// 		logger.Trace(fmt.Sprintf("Write event: %s", node.String()))
+// 		// set fileEvent props
+// 		nodeState := node.State()
+// 		fileEvent.State = &nodeState
+// 		// set node type
+// 		fileEvent.NodeType = node.Type()
+// 	default:
+// 	}
+// 	// do the magic sauce
+// 	switch {
+// 	// fsnotify.Create events occur for new inodes and renamed inodes
+// 	// for renamed inodes the create event occurs AFTER a rename event
+// 	// since we're tracking at the inode level the rename event is kinda useless
+// 	case eventIs(fsnotify.Create, fileEvent):
+//
+// 	// write events occur when you modify the contents of a file
+// 	// writes may occur one after another // TODO: handle write event "streams"
+// 	case eventIs(fsnotify.Write, fileEvent):
+// 		// we should be watching this node
+// 		logger.Trace(fmt.Sprintf("inode: %d", node.Ino()))
+// 		watched, nodeExists := watchedInodeMap[node.Ino()]
+// 		if !nodeExists {
+// 			logger.Error(fmt.Sprintf("Can't find watched for %q", relPath))
+// 			os.Exit(1)
+// 		}
+//
+// 		watched.Node = node
+// 	// fsnotify.Remove events occur on (you guessed it)
+// 	case eventIs(fsnotify.Remove, fileEvent):
+// 		logger.Trace(fmt.Sprintf("Remove event: %q", relPath))
+// 		// we should be watching this node
+// 		watched, nodeExists := watchedPathMap[fileEvent.Name]
+// 		if !nodeExists {
+// 			logger.Error(fmt.Sprintf("Can't find watched for %q", relPath))
+// 			os.Exit(1)
+// 		}
+// 		// set fileEvent props
+// 		fileEvent.Type = "remove"
+// 		fileEvent.NodeType = watched.Node.Type()
+// 	case eventIs(fsnotify.Rename, fileEvent):
+// 		logger.Info(fmt.Sprintf("Rename event: %q", relPath))
+// 		watched, nodeExists := watchedPathMap[fileEvent.Name]
+// 		if !nodeExists {
+// 			logger.Error(fmt.Sprintf("Can't find watched for %q", relPath))
+// 			os.Exit(1)
+// 		}
+// 		// set fileEvent props
+// 		fileEvent.Type = "rename"
+// 		fileEvent.NodeType = watched.Node.Type()
+// 	// nil the fileEvent pointer and trace it for unhandled events
+// 	default:
+// 		logger.Trace(fmt.Sprintf("%v event: %q", fileEvent.Op, relPath))
+// 		fileEvent = nil
+// 	}
+//
+// 	return fileEvent, nil
+// }
 
 func eventIs(op fsnotify.Op, event *fsnotify.Event) bool {
 	return event.Op&op == op
+}
+
+func lkpWatched(fileEvent *FileEvent) (*WatchedNode, *Node, error) {
+	switch fileEvent.Type {
+	case "create":
+		node, err := newNode(fileEvent.Name)
+		if err != nil {
+			return nil, node, err
+		}
+		return watchedInodeMap[node.Ino()], node, nil
+	case "write":
+		node, err := newNode(fileEvent.Name)
+		if err != nil {
+			return nil, node, err
+		}
+		return watchedInodeMap[node.Ino()], node, nil
+	case "remove":
+		watched := watchedPathMap[fileEvent.Name]
+		return watched, watched.Node, nil
+	case "rename":
+		watched := watchedPathMap[fileEvent.Name]
+		return watched, watched.Node, nil
+	default:
+		return nil, nil, errors.ErrUnsupported
+	}
 }
 
 func getManagedDirFromFullPath(name string) (string, *ManagedDirectory) {
