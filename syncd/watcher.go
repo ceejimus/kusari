@@ -1,4 +1,4 @@
-package main
+package syncd
 
 import (
 	"errors"
@@ -8,26 +8,27 @@ import (
 	"strings"
 	"time"
 
+	files "atmoscape.net/fileserver/fs"
+	"atmoscape.net/fileserver/logger"
 	"github.com/fsnotify/fsnotify"
 	"github.com/google/uuid"
 )
 
 // TODO: make "enum"
 type FileEvent struct {
-	Name      string    // the name of the underlying event (full path)
-	Type      string    // "create", "modify", "delete", "rename"
-	Timestamp time.Time // time event processed
-	// NodeType  NodeType   // the type of node
-	State *NodeState // node state
-	Next  *FileEvent // next event for this node
-	Prev  *FileEvent // previous event for this node
+	Name      string           // the name of the underlying event (full path)
+	Type      string           // "create", "modify", "delete", "rename"
+	Timestamp time.Time        // time event processed
+	State     *files.NodeState // node state
+	Next      *FileEvent       // next event for this node
+	Prev      *FileEvent       // previous event for this node
 }
 
 type WatchedNode struct {
-	UUID uuid.UUID  // id
-	Head *FileEvent // head of list
-	Tail *FileEvent // pointer to most recent event
-	Node *Node      // the node we're watching
+	UUID uuid.UUID   // id
+	Head *FileEvent  // head of list
+	Tail *FileEvent  // pointer to most recent event
+	Node *files.Node // the node we're watching
 }
 
 // for create / write we can (and should) find watched via inode
@@ -41,7 +42,7 @@ var watchedInodeMap WatchedInodeMap
 var watchedPathMap WatchedPathMap
 var managedDirMap map[string]ManagedDirectory
 
-func initWatcher(config *NodeConfig, managedMap ManagedMap) *fsnotify.Watcher {
+func InitWatcher(topDir string, managedDirs []ManagedDirectory, managedMap ManagedMap) *fsnotify.Watcher {
 	// init globals
 	watchedNodes = make([]WatchedNode, 0)
 	watchedInodeMap = make(WatchedInodeMap)
@@ -54,9 +55,9 @@ func initWatcher(config *NodeConfig, managedMap ManagedMap) *fsnotify.Watcher {
 		return nil
 	}
 	// add managed dirs to watcher
-	for _, dir := range config.ManagedDirectories {
+	for _, dir := range managedDirs {
 		// TODO: ignore events based on globs
-		dirPath := filepath.Join(config.TopDir, dir.Path)
+		dirPath := filepath.Join(topDir, dir.Path)
 
 		nodes := managedMap[dir.Path]
 		// populate event logs w/ pseudos based on current state
@@ -79,26 +80,7 @@ func initWatcher(config *NodeConfig, managedMap ManagedMap) *fsnotify.Watcher {
 	return watcher
 }
 
-func pseudoWatched(node *Node) *WatchedNode {
-	state := node.State()
-	fileEvent := FileEvent{
-		Name:      node.Path,
-		Type:      "create",
-		Timestamp: time.Now(),
-		State:     &state,
-		// Watched:   nil,
-	}
-	watched := WatchedNode{
-		UUID: uuid.New(),
-		Head: &fileEvent,
-		Tail: &fileEvent,
-		Node: node,
-	}
-	// fileEvent.Watched = &watched
-	return &watched
-}
-
-func runWatcher(watcher *fsnotify.Watcher) {
+func RunWatcher(watcher *fsnotify.Watcher) {
 	defer watcher.Close()
 	for {
 		select {
@@ -129,6 +111,25 @@ func runWatcher(watcher *fsnotify.Watcher) {
 			logger.Info(fmt.Sprintf("Error received:\n%v", err.Error()))
 		}
 	}
+}
+
+func pseudoWatched(node *files.Node) *WatchedNode {
+	state := node.State()
+	fileEvent := FileEvent{
+		Name:      node.Path,
+		Type:      "create",
+		Timestamp: time.Now(),
+		State:     &state,
+		// Watched:   nil,
+	}
+	watched := WatchedNode{
+		UUID: uuid.New(),
+		Head: &fileEvent,
+		Tail: &fileEvent,
+		Node: node,
+	}
+	// fileEvent.Watched = &watched
+	return &watched
 }
 
 func recursiveWatcherAdd(watcher *fsnotify.Watcher, path string) error {
@@ -178,7 +179,7 @@ func handleEvent(event *fsnotify.Event) (*FileEvent, bool, error) {
 		}
 	}
 
-	return fileEvent, fileEvent.Type == "create" && node.Type() == DIR, nil
+	return fileEvent, fileEvent.Type == "create" && node.Type() == files.DIR, nil
 }
 
 func parseEvent(event *fsnotify.Event) *FileEvent {
@@ -204,7 +205,7 @@ func parseEvent(event *fsnotify.Event) *FileEvent {
 	return &fileEvent
 }
 
-func setNodeState(fileEvent *FileEvent, node *Node) {
+func setNodeState(fileEvent *FileEvent, node *files.Node) {
 	// match event name (full path to file) to managed directory
 	// dirPath, dir := getManagedDirFromFullPath(fileEvent.Name)
 	// if dirPath == "" || dir == nil {
@@ -232,7 +233,7 @@ func setNodeState(fileEvent *FileEvent, node *Node) {
 	}
 }
 
-func linkEvents(fileEvent *FileEvent, watched *WatchedNode, node *Node) *WatchedNode {
+func linkEvents(fileEvent *FileEvent, watched *WatchedNode, node *files.Node) *WatchedNode {
 	if fileEvent.Type == "create" {
 		// REMEMBER: we find this watched by inode lookup
 		if watched != nil { // this is either a rename, a recreate, or a reuse of inode
@@ -341,16 +342,16 @@ func eventIs(op fsnotify.Op, event *fsnotify.Event) bool {
 	return event.Op&op == op
 }
 
-func lkpWatched(fileEvent *FileEvent) (*WatchedNode, *Node, error) {
+func lkpWatched(fileEvent *FileEvent) (*WatchedNode, *files.Node, error) {
 	switch fileEvent.Type {
 	case "create":
-		node, err := newNode(fileEvent.Name)
+		node, err := files.NewNode(fileEvent.Name)
 		if err != nil {
 			return nil, node, err
 		}
 		return watchedInodeMap[node.Ino()], node, nil
 	case "write":
-		node, err := newNode(fileEvent.Name)
+		node, err := files.NewNode(fileEvent.Name)
 		if err != nil {
 			return nil, node, err
 		}

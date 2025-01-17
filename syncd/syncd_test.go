@@ -1,4 +1,4 @@
-package main
+package syncd
 
 import (
 	"errors"
@@ -7,6 +7,7 @@ import (
 	"path/filepath"
 	"testing"
 
+	files "atmoscape.net/fileserver/fs"
 	"github.com/stretchr/testify/assert"
 )
 
@@ -93,75 +94,6 @@ func (f *TmpFile) Size() int64 {
 	return int64(len(f.Content))
 }
 
-func TestMain(m *testing.M) {
-	setup()
-	code := m.Run()
-	// shutdown()
-	os.Exit(code)
-}
-
-func setup() {
-	logger = makeLogger("")
-}
-
-func TestRelPathTrailingSlash(t *testing.T) {
-	wanted := "subdir/f.txt"
-
-	relDir := "/path/to/reldir/"
-	fullPath := "/path/to/reldir/subdir/f.txt"
-
-	got := getRelativePath(fullPath, relDir)
-
-	if wanted == got {
-		return
-	}
-
-	assert.Equal(t, wanted, got)
-}
-
-func TestRelPathNoTrailingSlash(t *testing.T) {
-	wanted := "subdir/f.txt"
-
-	relDir := "/path/to/reldir"
-	fullPath := "/path/to/reldir/subdir/f.txt"
-
-	got := getRelativePath(fullPath, relDir)
-
-	if wanted == got {
-		return
-	}
-
-	assert.Equal(t, wanted, got)
-}
-
-func TestFileHashWorks(t *testing.T) {
-	content := "i am test"
-	wanted := "97b74985df45e248be264fddc8172f71"
-
-	tmpDir := TmpDir{
-		Name: "d1",
-		Dirs: make([]*TmpDir, 0),
-		Files: []*TmpFile{
-			{
-				Name:    "f1.txt",
-				Content: []byte(content),
-			},
-		},
-	}
-	_, err := tmpDir.Instantiate("")
-	if err != nil {
-		t.Error(err)
-	}
-	defer tmpDir.Destroy()
-
-	got, err := fileHash(tmpDir.Files[0].Path)
-	if err != nil {
-		t.Error(err)
-	}
-
-	assert.Equal(t, got, wanted)
-}
-
 func helperTestGetManagedFiles(t *testing.T, tmpDir TmpDir, include []string, exclude []string, wanted []string) {
 	topdir, err := tmpDir.Instantiate("")
 	if err != nil {
@@ -179,7 +111,7 @@ func helperTestGetManagedFiles(t *testing.T, tmpDir TmpDir, include []string, ex
 	got := make([]string, len(managedFiles))
 
 	for i, managedFile := range managedFiles {
-		got[i] = managedFile.Path
+		got[i] = files.GetRelativePath(managedFile.Path, tmpDir.Path)
 	}
 
 	assert.ElementsMatch(t, wanted, got)
@@ -334,6 +266,10 @@ func TestGetManagedFilesSubDirs(t *testing.T) {
 		"sub2/f2.txt",
 		"sub3/f3.txt",
 		"sub3/sub4/f5.txt",
+		"sub1",
+		"sub2",
+		"sub3",
+		"sub3/sub4",
 	}
 
 	tmpDir := TmpDir{
@@ -402,6 +338,9 @@ func TestGetManagedFilesSubDirsIncludeExcludeGlob(t *testing.T) {
 		"f2.txt",
 		"sub1/f1.txt",
 		"sub3/f3.txt",
+		"sub1",
+		"sub2",
+		"sub3",
 	}
 
 	tmpDir := TmpDir{
@@ -458,7 +397,7 @@ func TestGetManagedFilesSubDirsIncludeExcludeGlob(t *testing.T) {
 		},
 	}
 
-	include := []string{"*.txt"}
+	include := []string{"*.txt", "**/"}
 	exclude := []string{"sub3/sub4**"}
 
 	helperTestGetManagedFiles(t, tmpDir, include, exclude, wanted)

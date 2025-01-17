@@ -3,22 +3,26 @@ package main
 import (
 	"fmt"
 	"os"
+
+	"atmoscape.net/fileserver/config"
+	"atmoscape.net/fileserver/logger"
+	"atmoscape.net/fileserver/syncd"
 )
 
-var logger Logger
+const CONFIG_YAML_PATH = "./.data/cnf.yaml"
 
 func main() {
-	config, err := loadConfig(CONFIG_YAML_PATH)
+	config, err := config.LoadConfig(CONFIG_YAML_PATH)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "Failed to parse YAML config @ '%s'\n%s\n", CONFIG_YAML_PATH, err)
 		os.Exit(1)
 	}
 
-	logger = makeLogger(config.LogLevel)
+	logger.Init(config.LogLevel)
 
 	logger.Info(fmt.Sprintf("Running w/ config:%v\n", config))
 
-	managedMap, err := getManagedMap(config.TopDir, config.ManagedDirectories)
+	managedMap, err := syncd.GetManagedMap(config.TopDir, config.ManagedDirectories)
 	if err != nil {
 		logger.Error(err.Error())
 		os.Exit(1) // TODO: gracefully handle these
@@ -31,8 +35,8 @@ func main() {
 		}
 	}
 
-	watcher := initWatcher(config, managedMap)
-	go runWatcher(watcher)
+	watcher := syncd.InitWatcher(config.TopDir, config.ManagedDirectories, managedMap)
+	go syncd.RunWatcher(watcher)
 
 	// db, err := initDb(config.DSN)
 	// if err != nil {
