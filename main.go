@@ -18,6 +18,12 @@ func main() {
 		os.Exit(1)
 	}
 
+	err = config.Validate()
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "Invalid config\n%s\n", err.Error())
+		os.Exit(1)
+	}
+
 	logger.Init(config.LogLevel)
 
 	logger.Info(fmt.Sprintf("Running w/ config:%v\n", config))
