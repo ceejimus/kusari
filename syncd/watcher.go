@@ -47,7 +47,8 @@ type FileEvent struct {
 
 func (w *Watcher) getDirForEvent(name string) (*string, *Dir) {
 	for dirPath, dir := range w.dirPathMap {
-		if strings.HasPrefix(name, filepath.Join(w.topDir, dirPath)) {
+		fullPath := filepath.Join(w.topDir, dirPath)
+		if strings.HasPrefix(name, fullPath) {
 			return &dirPath, dir
 		}
 	}
@@ -62,8 +63,14 @@ func (w *Watcher) getDirForEvent(name string) (*string, *Dir) {
 // }
 
 func InitWatcher(topDir string, managedDirs []ManagedDirectory, managedMap ManagedMap, store EventStore) *Watcher {
-	// create a new watcher
-	watcher, err := fsnotify.NewWatcher()
+	// create a new inner
+	inner, err := fsnotify.NewWatcher()
+	watcher := Watcher{
+		inner:      inner,
+		store:      store,
+		topDir:     topDir,
+		dirPathMap: make(map[string]*Dir),
+	}
 	if err != nil {
 		logger.Error(err.Error())
 		return nil
@@ -71,7 +78,7 @@ func InitWatcher(topDir string, managedDirs []ManagedDirectory, managedMap Manag
 	// add managed dirs to watcher
 	for _, dir := range managedDirs {
 		// TODO: ignore events based on globs
-		dirPath := filepath.Join(topDir, dir.Path)
+		dirName := filepath.Join(topDir, dir.Path)
 
 		newDir := &Dir{
 			Path:      dir.Path,
@@ -84,6 +91,8 @@ func InitWatcher(topDir string, managedDirs []ManagedDirectory, managedMap Manag
 			os.Exit(1)
 		}
 
+		watcher.dirPathMap[newDir.Path] = newDir
+
 		nodes := managedMap[dir.Path]
 		// populate event logs w/ pseudos based on current state
 		for _, node := range nodes {
@@ -91,7 +100,7 @@ func InitWatcher(topDir string, managedDirs []ManagedDirectory, managedMap Manag
 			event := &Event{
 				DirID:     newDir.ID,
 				Timestamp: time.Now(),
-				Path:      files.GetRelativePath(dirPath, node.Path),
+				Path:      files.GetRelativePath(node.Path, dirName),
 				Type:      "create",
 				Size:      state.Size,
 				Hash:      state.Hash,
@@ -118,15 +127,15 @@ func InitWatcher(topDir string, managedDirs []ManagedDirectory, managedMap Manag
 			}
 		}
 
-		err = recursiveWatcherAdd(watcher, dirPath)
+		err = recursiveWatcherAdd(inner, dirName)
 		if err != nil {
-			logger.Error(fmt.Sprintf("Failed to add %q to watcher.\n", dirPath))
+			logger.Error(fmt.Sprintf("Failed to add %q to watcher.\n", dirName))
 			return nil
 		}
-		logger.Info(fmt.Sprintf("Watching %q\n", dirPath))
+		logger.Info(fmt.Sprintf("Watching %q\n", dirName))
 	}
 
-	return &Watcher{inner: watcher, store: store}
+	return &watcher
 }
 
 func RunWatcher(watcher *Watcher) {
@@ -145,7 +154,7 @@ func RunWatcher(watcher *Watcher) {
 			}
 
 			dirPath, dir := watcher.getDirForEvent(event.Name)
-			if dirPath != nil {
+			if dirPath == nil {
 				logger.Error(fmt.Sprintf("Failed to find dir for event: %s", event))
 			}
 
@@ -209,7 +218,7 @@ func handleEvent(dirEvent *dirEvent, store EventStore) (bool, error) {
 	event := Event{
 		DirID:     dirEvent.dirID,
 		Timestamp: fileEvent.Timestamp,
-		Path:      files.GetRelativePath(dirEvent.dirPath, fileEvent.Name),
+		Path:      files.GetRelativePath(fileEvent.Name, dirEvent.dirName),
 		Type:      fileEvent.Type,
 	}
 
@@ -225,10 +234,12 @@ func handleEvent(dirEvent *dirEvent, store EventStore) (bool, error) {
 		os.Exit(1)
 	}
 
-	err = store.SetEventNext(event.PrevID, newEvent.ID)
-	if err != nil {
-		logger.Error(err.Error())
-		os.Exit(1)
+	if event.PrevID != uuid.Nil {
+		err = store.SetEventNext(event.PrevID, newEvent.ID)
+		if err != nil {
+			logger.Error(err.Error())
+			os.Exit(1)
+		}
 	}
 
 	if chain != nil {
@@ -250,11 +261,18 @@ func handleEvent(dirEvent *dirEvent, store EventStore) (bool, error) {
 	}
 
 	if fileEvent.Type == "remove" {
-		// TODO:
-		logger.Error("Print event chain")
-		// for e := chain.Head; e != nil; e = e.Next {
-		// 	logger.Info(fmt.Sprintf("%p - %v %s\n", e, e.Type, e.State))
-		// }
+		logger.Debug("=================================")
+		currID := chain.HeadID
+		for currID != uuid.Nil {
+			currEvent, err := store.GetEventByUUID(currID)
+			if err != nil {
+				logger.Debug(err.Error())
+				break
+			}
+			logger.Debug(currEvent.String())
+			currID = currEvent.NextID
+		}
+		logger.Debug("=================================")
 	}
 
 	return fileEvent.Type == "create" && node.Type() == files.DIR, nil
@@ -307,19 +325,28 @@ func lkpChain(dirEvent *dirEvent, store EventStore) (*Chain, *files.Node, error)
 		if err != nil {
 			return nil, node, err
 		}
+		if chain == nil {
+			return nil, node, errors.New(fmt.Sprintf("No chain by ino on write event %+v\n%d", dirEvent, node.Ino()))
+		}
 
 		return chain, node, nil
 	case "remove":
-		chain, err := store.GetChainByPath(dirEvent.dirID, files.GetRelativePath(dirEvent.dirPath, fileEvent.Name))
+		chain, err := store.GetChainByPath(dirEvent.dirID, files.GetRelativePath(fileEvent.Name, dirEvent.dirName))
 		if err != nil {
 			return nil, nil, err
+		}
+		if chain == nil {
+			return nil, nil, errors.New(fmt.Sprintf("No chain by path on remove event %+v", dirEvent))
 		}
 
 		return chain, nil, nil
 	case "rename":
-		chain, err := store.GetChainByPath(dirEvent.dirID, files.GetRelativePath(dirEvent.dirPath, fileEvent.Name))
+		chain, err := store.GetChainByPath(dirEvent.dirID, files.GetRelativePath(fileEvent.Name, dirEvent.dirName))
 		if err != nil {
 			return nil, nil, err
+		}
+		if chain == nil {
+			return nil, nil, errors.New(fmt.Sprintf("No chain by path on remove event %+v", dirEvent))
 		}
 
 		return chain, nil, nil

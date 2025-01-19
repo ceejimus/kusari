@@ -83,7 +83,8 @@ func (s *MemStore) AddEvent(event Event) (*Event, error) {
 func (s *MemStore) GetDirByUUID(id uuid.UUID) (*Dir, error) {
 	memDir, ok := getDirByUUID(s, id)
 	if !ok {
-		return nil, errors.New(fmt.Sprintf("No Dir exists w/ ID: %s", id))
+		// return nil, errors.New(fmt.Sprintf("No Dir exists w/ ID: %s", id))
+		return nil, nil
 	}
 	return toDir(memDir), nil
 }
@@ -91,7 +92,8 @@ func (s *MemStore) GetDirByUUID(id uuid.UUID) (*Dir, error) {
 func (s *MemStore) GetDirByPath(path string) (*Dir, error) {
 	memDir, ok := getDirByPath(s, path)
 	if !ok {
-		return nil, errors.New(fmt.Sprintf("No Dir exists w/ path: %s", path))
+		// return nil, errors.New(fmt.Sprintf("No Dir exists w/ path: %s", path))
+		return nil, nil
 	}
 	return toDir(memDir), nil
 }
@@ -99,7 +101,8 @@ func (s *MemStore) GetDirByPath(path string) (*Dir, error) {
 func (s *MemStore) GetChainByUUID(id uuid.UUID) (*Chain, error) {
 	memChain, ok := getChainByUUID(s, id)
 	if !ok {
-		return nil, errors.New(fmt.Sprintf("No Chain exists w/ ID: %s", id))
+		// return nil, errors.New(fmt.Sprintf("No Chain exists w/ ID: %s", id))
+		return nil, nil
 	}
 	return toChain(memChain), nil
 }
@@ -112,7 +115,8 @@ func (s *MemStore) GetChainByPath(dirID uuid.UUID, path string) (*Chain, error) 
 
 	memChain, ok := getChainByPath(s, dirID, path)
 	if !ok {
-		return nil, errors.New(fmt.Sprintf("No Chain exists for path: %s", path))
+		// return nil, errors.New(fmt.Sprintf("No Chain exists for path: %s", path))
+		return nil, nil
 	}
 	return toChain(memChain), nil
 }
@@ -120,7 +124,8 @@ func (s *MemStore) GetChainByPath(dirID uuid.UUID, path string) (*Chain, error) 
 func (s *MemStore) GetChainByIno(ino uint64) (*Chain, error) {
 	memChain, ok := getChainByIno(s, ino)
 	if !ok {
-		return nil, errors.New(fmt.Sprintf("No Chain exists w/ Ino: %d", ino))
+		// return nil, errors.New(fmt.Sprintf("No Chain exists w/ Ino: %d", ino))
+		return nil, nil
 	}
 	return toChain(memChain), nil
 }
@@ -128,7 +133,8 @@ func (s *MemStore) GetChainByIno(ino uint64) (*Chain, error) {
 func (s *MemStore) GetEventByUUID(id uuid.UUID) (*Event, error) {
 	memEvent, ok := getEventByUUID(s, id)
 	if !ok {
-		return nil, errors.New(fmt.Sprintf("No Event exists w/ ID: %s", id))
+		// return nil, errors.New(fmt.Sprintf("No Event exists w/ ID: %s", id))
+		return nil, nil
 	}
 	return toEvent(memEvent), nil
 }
@@ -169,7 +175,7 @@ func (s *MemStore) SetChainTail(id uuid.UUID, eventID uuid.UUID) error {
 }
 
 func (s *MemStore) SetEventNext(id uuid.UUID, eventID uuid.UUID) error {
-	_, ok := getEventByUUID(s, eventID)
+	next, ok := getEventByUUID(s, eventID)
 	if !ok {
 		return errors.New(fmt.Sprintf("Cannot set event next, nonexistent next event: %s", eventID))
 	}
@@ -179,7 +185,7 @@ func (s *MemStore) SetEventNext(id uuid.UUID, eventID uuid.UUID) error {
 		return errors.New(fmt.Sprintf("Cannot set event next, nonexistent next event: %s", eventID))
 	}
 
-	memEvent.Next = memEvent
+	memEvent.Next = next
 
 	return nil
 }

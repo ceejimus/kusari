@@ -59,11 +59,15 @@ func (c Chain) String() string {
 }
 
 func (e Event) String() string {
+	hash := "<nil>"
+	if e.Hash != nil {
+		hash = *e.Hash
+	}
 	return fmt.Sprintf("Event: (%s) %s - %s %q |%s|",
 		e.Type,
 		e.Timestamp.Format(time.RFC1123),
 		e.ID,
 		e.Path,
-		*e.Hash,
+		hash,
 	)
 }
