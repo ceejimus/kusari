@@ -76,8 +76,8 @@ func (s *MemStore) AddChain(chain Chain) (*Chain, error) {
 	return addChain(s, chain)
 }
 
-func (s *MemStore) AddEvent(event Event) (*Event, error) {
-	return addEvent(s, event)
+func (s *MemStore) AddEvent(event Event, chainID uuid.UUID) (*Event, error) {
+	return addEvent(s, event, chainID)
 }
 
 func (s *MemStore) GetDirByUUID(id uuid.UUID) (*Dir, error) {
@@ -139,53 +139,45 @@ func (s *MemStore) GetEventByUUID(id uuid.UUID) (*Event, error) {
 	return toEvent(memEvent), nil
 }
 
-func (s *MemStore) SetChainTail(id uuid.UUID, eventID uuid.UUID) error {
+func (s *MemStore) GetEventsInChain(id uuid.UUID) ([]Event, error) {
 	memChain, ok := getChainByUUID(s, id)
 	if !ok {
-		return errors.New(fmt.Sprintf("Cannot set chain tail, nonexistent chain: %s", id))
+		return nil, errors.New(fmt.Sprintf("No Chain exists w/ ID: %s", id))
 	}
 
-	memDir, ok := getDirByUUID(s, memChain.Dir.ID)
-	if !ok {
-		return errors.New(fmt.Sprintf("Cannot set chain tail, non-existant dir %s for chain %s", memChain.Dir.ID, memChain.ID))
+	events := make([]Event, 0)
+
+	curr := memChain.Head
+	for curr != nil {
+		// currEvent, err := store.GetEventByUUID(curr)
+		// if err != nil {
+		// 	logger.Debug(err.Error())
+		// 	break
+		// }
+		// logger.Debug(currEvent.String())
+		events = append(events, *toEvent(curr))
+		curr = curr.Next
 	}
 
-	chainPathMap, ok := s.chainPathMap[memDir.ID]
+	return events, nil
+}
+
+func setChainTail(s *MemStore, memChain *MemChain, memEvent *MemEvent) error {
+	chainPathMap, ok := s.chainPathMap[memChain.Dir.ID]
 	if !ok {
-		// this is a safety thing, maybe error?
 		chainPathMap = make(map[string]*MemChain)
-		s.chainPathMap[memDir.ID] = chainPathMap
+		s.chainPathMap[memChain.Dir.ID] = chainPathMap
 	}
 
-	memEvent, ok := getEventByUUID(s, eventID)
-	if !ok {
-		return errors.New(fmt.Sprintf("Cannot set chain tail, nonexistent event: %s", eventID))
-	}
-
-	if memChain.Tail.Path != memEvent.Path {
+	if memChain.Tail != nil && memChain.Tail.Path != memEvent.Path {
 		// for events that change path names (renames)
 		// we need this map to be up to date
-		chainPathMap[memEvent.Path] = memChain
 		delete(chainPathMap, memChain.Tail.Path)
 	}
 
+	chainPathMap[memEvent.Path] = memChain
+
 	memChain.Tail = memEvent
-
-	return nil
-}
-
-func (s *MemStore) SetEventNext(id uuid.UUID, eventID uuid.UUID) error {
-	next, ok := getEventByUUID(s, eventID)
-	if !ok {
-		return errors.New(fmt.Sprintf("Cannot set event next, nonexistent next event: %s", eventID))
-	}
-
-	memEvent, ok := getEventByUUID(s, id)
-	if !ok {
-		return errors.New(fmt.Sprintf("Cannot set event next, nonexistent next event: %s", eventID))
-	}
-
-	memEvent.Next = next
 
 	return nil
 }
@@ -238,26 +230,31 @@ func addChain(s *MemStore, chain Chain) (*Chain, error) {
 
 	s.chainIDMap[memChain.ID] = memChain
 	s.chainInoMap[memChain.Ino] = memChain
-	s.chainPathMap[memDir.ID][memChain.Tail.Path] = memChain
+	s.chainPathMap[memDir.ID] = make(map[string]*MemChain)
 
 	return &chain, nil
 }
 
-func addEvent(s *MemStore, event Event) (*Event, error) {
+func addEvent(s *MemStore, event Event, chainID uuid.UUID) (*Event, error) {
 	if event.ID != uuid.Nil {
 		return nil, errors.New(fmt.Sprintf("Cannot add new event, non-nil ID %s", event))
 	}
 
-	memDir, ok := getDirByUUID(s, event.DirID)
+	memChain, ok := getChainByUUID(s, chainID)
 	if !ok {
-		return nil, errors.New(fmt.Sprintf("Cannot add new event, non-existant dir %s", event))
+		return nil, errors.New(fmt.Sprintf("Cannot add new event, non-existent chain: %s", chainID))
 	}
 
-	eventPathMap, ok := s.eventPathMap[memDir.ID]
+	// memDir, ok := getDirByUUID(s, event.DirID)
+	// if !ok {
+	// 	return nil, errors.New(fmt.Sprintf("Cannot add new event, non-existent dir %s", event))
+	// }
+
+	eventPathMap, ok := s.eventPathMap[memChain.Dir.ID]
 	if !ok {
 		// this is a safety thing, maybe error?
 		eventPathMap = make(map[string]*MemEvent)
-		s.eventPathMap[memDir.ID] = eventPathMap
+		s.eventPathMap[memChain.Dir.ID] = eventPathMap
 	}
 
 	memEvent, err := toMemEvent(s, &event)
@@ -270,6 +267,19 @@ func addEvent(s *MemStore, event Event) (*Event, error) {
 
 	s.eventIDMap[memEvent.ID] = memEvent
 	eventPathMap[memEvent.Path] = memEvent
+
+	if memChain.Head == nil { // first event on chain
+		// Tail should also be nil
+		memChain.Head = memEvent
+	} else {
+		memEvent.Prev = memChain.Tail
+		memChain.Tail.Next = memEvent
+	}
+
+	err = setChainTail(s, memChain, memEvent)
+	if err != nil {
+		return nil, err
+	}
 
 	return &event, nil
 }
@@ -324,11 +334,11 @@ func toMemDir(dir *Dir) *MemDir {
 
 func toChain(memChain *MemChain) *Chain {
 	return &Chain{
-		ID:     memChain.ID,
-		DirID:  memChain.Dir.ID,
-		HeadID: memChain.Head.ID,
-		TailID: memChain.Tail.ID,
-		Ino:    memChain.Ino,
+		ID:    memChain.ID,
+		DirID: memChain.Dir.ID,
+		// HeadID: memChain.Head.ID,
+		// TailID: memChain.Tail.ID,
+		Ino: memChain.Ino,
 	}
 }
 
@@ -337,33 +347,33 @@ func toMemChain(s *MemStore, chain *Chain) (*MemChain, error) {
 	if !ok {
 		return nil, errors.New(fmt.Sprintf("Cannot add chain, nonexistent parent dir: %s", chain.DirID))
 	}
-	head, ok := getEventByUUID(s, chain.HeadID)
-	if !ok {
-		return nil, errors.New(fmt.Sprintf("Cannot add chain, nonexistent head event: %s", chain.HeadID))
-	}
-	tail, ok := getEventByUUID(s, chain.TailID)
-	if !ok {
-		return nil, errors.New(fmt.Sprintf("Cannot add chain, nonexistent head event: %s", chain.TailID))
-	}
+	// head, ok := getEventByUUID(s, chain.HeadID)
+	// if !ok {
+	// 	return nil, errors.New(fmt.Sprintf("Cannot add chain, nonexistent head event: %s", chain.HeadID))
+	// }
+	// tail, ok := getEventByUUID(s, chain.TailID)
+	// if !ok {
+	// 	return nil, errors.New(fmt.Sprintf("Cannot add chain, nonexistent head event: %s", chain.TailID))
+	// }
 
 	return &MemChain{
-		ID:   chain.ID,
-		Dir:  dir,
-		Head: head,
-		Tail: tail,
-		Ino:  chain.Ino,
+		ID:  chain.ID,
+		Dir: dir,
+		// Head: head,
+		// Tail: tail,
+		Ino: chain.Ino,
 	}, nil
 }
 
 func toEvent(memEvent *MemEvent) *Event {
-	var prevID uuid.UUID
-	var nextID uuid.UUID
-	if memEvent.Prev != nil {
-		prevID = memEvent.Prev.ID
-	}
-	if memEvent.Next != nil {
-		nextID = memEvent.Next.ID
-	}
+	// var prevID uuid.UUID
+	// var nextID uuid.UUID
+	// if memEvent.Prev != nil {
+	// 	prevID = memEvent.Prev.ID
+	// }
+	// if memEvent.Next != nil {
+	// 	nextID = memEvent.Next.ID
+	// }
 	return &Event{
 		ID:        memEvent.ID,
 		DirID:     memEvent.Dir.ID,
@@ -373,35 +383,35 @@ func toEvent(memEvent *MemEvent) *Event {
 		Size:      memEvent.Size,
 		Hash:      memEvent.Hash,
 		ModTime:   memEvent.ModTime,
-		PrevID:    prevID,
-		NextID:    nextID,
+		// PrevID:    prevID,
+		// NextID:    nextID,
 	}
 }
 
 func toMemEvent(s *MemStore, event *Event) (*MemEvent, error) {
-	var prev *MemEvent
-	var next *MemEvent
+	// var prev *MemEvent
+	// var next *MemEvent
 
 	dir, ok := getDirByUUID(s, event.DirID)
 	if !ok {
 		return nil, errors.New(fmt.Sprintf("Cannot add event, nonexistent parent dir: %s", event.DirID))
 	}
 
-	if event.PrevID != uuid.Nil {
-		prevEv, ok := getEventByUUID(s, event.PrevID)
-		if !ok {
-			return nil, errors.New(fmt.Sprintf("Cannot add event, nonexistent prev event: %s", event.PrevID))
-		}
-		prev = prevEv
-	}
-
-	if event.NextID != uuid.Nil {
-		nextEv, ok := getEventByUUID(s, event.NextID)
-		if !ok {
-			return nil, errors.New(fmt.Sprintf("Cannot add event, nonexistent next event: %s", event.NextID))
-		}
-		next = nextEv
-	}
+	// if event.PrevID != uuid.Nil {
+	// 	prevEv, ok := getEventByUUID(s, event.PrevID)
+	// 	if !ok {
+	// 		return nil, errors.New(fmt.Sprintf("Cannot add event, nonexistent prev event: %s", event.PrevID))
+	// 	}
+	// 	prev = prevEv
+	// }
+	//
+	// if event.NextID != uuid.Nil {
+	// 	nextEv, ok := getEventByUUID(s, event.NextID)
+	// 	if !ok {
+	// 		return nil, errors.New(fmt.Sprintf("Cannot add event, nonexistent next event: %s", event.NextID))
+	// 	}
+	// 	next = nextEv
+	// }
 
 	return &MemEvent{
 		ID:        event.ID,
@@ -412,8 +422,8 @@ func toMemEvent(s *MemStore, event *Event) (*MemEvent, error) {
 		ModTime:   event.ModTime,
 		Hash:      event.Hash,
 		Size:      event.Size,
-		Next:      next,
-		Prev:      prev,
+		// Next:      next,
+		// Prev:      prev,
 	}, nil
 }
 

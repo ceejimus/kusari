@@ -107,24 +107,23 @@ func InitWatcher(topDir string, managedDirs []ManagedDirectory, managedMap Manag
 				ModTime:   state.ModTime,
 			}
 
-			newEvent, err := store.AddEvent(*event)
-			if err != nil {
-				logger.Error(fmt.Sprintf("Failed to add event to event store:\n%s", err.Error()))
-				os.Exit(1)
-			}
-
 			chain := &Chain{
-				DirID:  newDir.ID,
-				HeadID: newEvent.ID,
-				TailID: newEvent.ID,
-				Ino:    node.Ino(),
+				DirID: newDir.ID,
+				Ino:   node.Ino(),
 			}
 
-			_, err = store.AddChain(*chain)
+			newChain, err := store.AddChain(*chain)
 			if err != nil {
 				logger.Error(fmt.Sprintf("Failed to add event to event store:\n%s", err.Error()))
 				os.Exit(1)
 			}
+
+			_, err = store.AddEvent(*event, newChain.ID)
+			if err != nil {
+				logger.Error(fmt.Sprintf("Failed to add event to event store:\n%s", err.Error()))
+				os.Exit(1)
+			}
+
 		}
 
 		err = recursiveWatcherAdd(inner, dirName)
@@ -165,12 +164,12 @@ func RunWatcher(watcher *Watcher) {
 				fileEvent: fileEvent,
 			}
 
-			newDir, err := handleEvent(&dirEvent, watcher.store)
+			isNewDir, err := handleEvent(&dirEvent, watcher.store)
 			if err != nil {
 				logger.Error(fmt.Sprintf("Failed to handle fsnotify event:\n%v\n", err.Error()))
 			}
 
-			if newDir {
+			if isNewDir {
 				logger.Trace(fmt.Sprintf("Watching new dir: %q", fileEvent.Name))
 				err := recursiveWatcherAdd(inner, fileEvent.Name)
 				if err != nil {
@@ -215,6 +214,28 @@ func handleEvent(dirEvent *dirEvent, store EventStore) (bool, error) {
 		return false, errors.ErrUnsupported
 	}
 
+	// add new chain for new nodes
+	if fileEvent.Type == "create" && chain == nil {
+		// if we don't have a chain AND we don't have a node then something is wrong
+		if node == nil {
+			logger.Error(fmt.Sprintf("Failed to find node for create event %v", dirEvent))
+			os.Exit(1)
+		}
+
+		newChain := &Chain{
+			DirID: dirEvent.dirID,
+			Ino:   node.Ino(),
+		}
+
+		newChain, err := store.AddChain(*newChain)
+		if err != nil {
+			logger.Error(err.Error())
+			os.Exit(1)
+		}
+
+		chain = newChain
+	}
+
 	event := Event{
 		DirID:     dirEvent.dirID,
 		Timestamp: fileEvent.Timestamp,
@@ -224,55 +245,21 @@ func handleEvent(dirEvent *dirEvent, store EventStore) (bool, error) {
 
 	setEventState(&event, node)
 
-	if chain != nil {
-		event.PrevID = chain.TailID
-	}
-
-	newEvent, err := store.AddEvent(event)
+	_, err = store.AddEvent(event, chain.ID)
 	if err != nil {
 		logger.Error(err.Error())
 		os.Exit(1)
 	}
 
-	if event.PrevID != uuid.Nil {
-		err = store.SetEventNext(event.PrevID, newEvent.ID)
-		if err != nil {
-			logger.Error(err.Error())
-			os.Exit(1)
-		}
-	}
-
-	if chain != nil {
-		store.SetChainTail(chain.ID, newEvent.ID)
-	} else {
-		// if we don't have a chain AND we don't have a node then what are we even doing?
-		chain := &Chain{
-			DirID:  dirEvent.dirID,
-			HeadID: newEvent.ID,
-			TailID: newEvent.ID,
-			Ino:    node.Ino(),
-		}
-
-		_, err := store.AddChain(*chain)
-		if err != nil {
-			logger.Error(err.Error())
-			os.Exit(1)
-		}
-	}
-
 	if fileEvent.Type == "remove" {
-		logger.Debug("=================================")
-		currID := chain.HeadID
-		for currID != uuid.Nil {
-			currEvent, err := store.GetEventByUUID(currID)
-			if err != nil {
-				logger.Debug(err.Error())
-				break
-			}
-			logger.Debug(currEvent.String())
-			currID = currEvent.NextID
+		events, err := store.GetEventsInChain(chain.ID)
+		if err != nil {
+			logger.Debug(err.Error())
 		}
 		logger.Debug("=================================")
+		for _, event := range events {
+			logger.Debug(fmt.Sprint(event))
+		}
 	}
 
 	return fileEvent.Type == "create" && node.Type() == files.DIR, nil

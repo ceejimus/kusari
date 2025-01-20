@@ -16,11 +16,11 @@ type Dir struct {
 }
 
 type Chain struct {
-	ID     uuid.UUID // should be generated when adding
-	DirID  uuid.UUID // ID of
-	HeadID uuid.UUID // the first event in the chain
-	TailID uuid.UUID // the last event in the chain
-	Ino    uint64    // the local inode
+	ID    uuid.UUID // should be generated when adding
+	DirID uuid.UUID // ID of chain's directory
+	Ino   uint64    // the local inode
+	// HeadID uuid.UUID // the first event in the chain
+	// TailID uuid.UUID // the last event in the chain
 }
 
 type Event struct {
@@ -32,22 +32,23 @@ type Event struct {
 	Size      uint64    // file size
 	Hash      *string   // file hash (null for non-files)
 	ModTime   time.Time // modification time
-	PrevID    uuid.UUID // the previous event ID
-	NextID    uuid.UUID // the next event ID
+	// PrevID    uuid.UUID // the previous event ID
+	// NextID    uuid.UUID // the next event ID
 }
 
 type EventStore interface {
 	AddDir(dir Dir) (*Dir, error)                                // add a new syncd directory
 	AddChain(chain Chain) (*Chain, error)                        // add a new event chain
-	AddEvent(event Event) (*Event, error)                        // add a new event
+	AddEvent(event Event, chainID uuid.UUID) (*Event, error)     // add a new event
 	GetDirByUUID(id uuid.UUID) (*Dir, error)                     // get syncd directory by UUID
 	GetDirByPath(path string) (*Dir, error)                      // get syncd dir by path
 	GetChainByUUID(id uuid.UUID) (*Chain, error)                 // get chain by UUID
 	GetChainByPath(dirID uuid.UUID, path string) (*Chain, error) // get chain whose tail is event w/ path
 	GetChainByIno(ino uint64) (*Chain, error)                    // get chain by ino
 	GetEventByUUID(id uuid.UUID) (*Event, error)                 // get event by UUID
-	SetChainTail(id uuid.UUID, eventID uuid.UUID) error          // set new tail event for chain
-	SetEventNext(id uuid.UUID, eventID uuid.UUID) error          // set new tail event for chain
+	GetEventsInChain(id uuid.UUID) ([]Event, error)
+	// SetChainTail(id uuid.UUID, eventID uuid.UUID) error          // set new tail event for chain
+	// SetEventNext(id uuid.UUID, eventID uuid.UUID) error          // set new tail event for chain
 }
 
 func (d Dir) String() string {
@@ -55,7 +56,7 @@ func (d Dir) String() string {
 }
 
 func (c Chain) String() string {
-	return fmt.Sprintf("Chain: %s <%d> /%s/ (%s, %s)", c.ID, c.Ino, c.DirID, c.HeadID, c.TailID)
+	return fmt.Sprintf("Chain: %s <%d> /%s/", c.ID, c.Ino, c.DirID)
 }
 
 func (e Event) String() string {
