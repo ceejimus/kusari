@@ -26,6 +26,8 @@ type dirEvent struct {
 	dirID     uuid.UUID
 	dirPath   string // full path
 	dirName   string // relative path
+	node      *files.Node
+	chain     *Chain
 	fileEvent *FileEvent
 }
 
@@ -39,12 +41,6 @@ type FileEvent struct {
 	Prev      *FileEvent       // previous event for this node
 }
 
-//
-// func (w *Watcher) getDirByFullPath(fullPath string) (*Dir, bool) {
-// 	dir, ok := w.dirPathMap[fullPath]
-// 	return dir, ok
-// }
-
 func (w *Watcher) getDirForEvent(name string) (*string, *Dir) {
 	for dirPath, dir := range w.dirPathMap {
 		fullPath := filepath.Join(w.topDir, dirPath)
@@ -55,14 +51,7 @@ func (w *Watcher) getDirForEvent(name string) (*string, *Dir) {
 	return nil, nil
 }
 
-// type WatchedNode struct {
-// 	UUID uuid.UUID   // id
-// 	Head *FileEvent  // head of list
-// 	Tail *FileEvent  // pointer to most recent event
-// 	Node *files.Node // the node we're watching
-// }
-
-func InitWatcher(topDir string, managedDirs []ManagedDirectory, managedMap ManagedMap, store EventStore) *Watcher {
+func InitWatcher(topDir string, managedDirs []ManagedDirectory, managedMap ManagedMap, store EventStore) (*Watcher, error) {
 	// create a new inner
 	inner, err := fsnotify.NewWatcher()
 	watcher := Watcher{
@@ -72,117 +61,126 @@ func InitWatcher(topDir string, managedDirs []ManagedDirectory, managedMap Manag
 		dirPathMap: make(map[string]*Dir),
 	}
 	if err != nil {
-		logger.Error(err.Error())
-		return nil
+		return nil, err
 	}
 	// add managed dirs to watcher
 	for _, dir := range managedDirs {
-		// TODO: ignore events based on globs
-		dirName := filepath.Join(topDir, dir.Path)
-
-		newDir := &Dir{
-			Path:      dir.Path,
-			ExclGlobs: dir.Exclude,
-			InclGlobs: dir.Include,
-		}
-		newDir, err := store.AddDir(*newDir)
-		if err != nil {
-			logger.Error(fmt.Sprintf("Failed to add dir to event store:\n%s", err.Error()))
-			os.Exit(1)
-		}
-
-		watcher.dirPathMap[newDir.Path] = newDir
-
+		// update event store w/ current directory state
 		nodes := managedMap[dir.Path]
-		// populate event logs w/ pseudos based on current state
-		for _, node := range nodes {
-			state := node.State()
-			event := &Event{
-				DirID:     newDir.ID,
-				Timestamp: time.Now(),
-				Path:      files.GetRelativePath(node.Path, dirName),
-				Type:      "create",
-				Size:      state.Size,
-				Hash:      state.Hash,
-				ModTime:   state.ModTime,
-			}
-
-			chain := &Chain{
-				DirID: newDir.ID,
-				Ino:   node.Ino(),
-			}
-
-			newChain, err := store.AddChain(*chain)
-			if err != nil {
-				logger.Error(fmt.Sprintf("Failed to add event to event store:\n%s", err.Error()))
-				os.Exit(1)
-			}
-
-			_, err = store.AddEvent(*event, newChain.ID)
-			if err != nil {
-				logger.Error(fmt.Sprintf("Failed to add event to event store:\n%s", err.Error()))
-				os.Exit(1)
-			}
-
-		}
-
-		err = recursiveWatcherAdd(inner, dirName)
+		newDir, err := updateStoreForLocalState(topDir, dir, nodes, store)
 		if err != nil {
-			logger.Error(fmt.Sprintf("Failed to add %q to watcher.\n", dirName))
-			return nil
+			return nil, err
 		}
-		logger.Info(fmt.Sprintf("Watching %q\n", dirName))
+		// add directory to path map for event lookups
+		watcher.dirPathMap[dir.Path] = newDir
+		// recursively add watcher to the directory and all sub-directories
+		err = recursiveWatcherAdd(inner, filepath.Join(topDir, dir.Path))
+		if err != nil {
+			return nil, err
+		}
+		logger.Info(fmt.Sprintf("Watching %q\n", dir.Path))
 	}
 
-	return &watcher
+	return &watcher, nil
 }
 
 func RunWatcher(watcher *Watcher) {
 	inner := watcher.inner
 	defer inner.Close()
+	// run loop
 	for {
 		select {
 		case event, ok := <-inner.Events:
-			if !ok {
+			if !ok { // channel closed
 				return
 			}
 			// transform fsnotify event into local node event
-			fileEvent := parseEvent(&event)
-			if fileEvent == nil {
+			fileEvent := toFileEvent(&event)
+			if fileEvent == nil { // ignored event
 				continue
 			}
-
+			// lookup managed directory by event name
 			dirPath, dir := watcher.getDirForEvent(event.Name)
 			if dirPath == nil {
 				logger.Error(fmt.Sprintf("Failed to find dir for event: %s", event))
 			}
-
+			// create new event wrapper
 			dirEvent := dirEvent{
 				dirID:     dir.ID,
 				dirPath:   *dirPath,
 				dirName:   filepath.Join(watcher.topDir, *dirPath),
 				fileEvent: fileEvent,
 			}
-
-			isNewDir, err := handleEvent(&dirEvent, watcher.store)
+			// handle this event
+			err := handleEvent(&dirEvent, watcher.store)
 			if err != nil {
 				logger.Error(fmt.Sprintf("Failed to handle fsnotify event:\n%v\n", err.Error()))
 			}
-
-			if isNewDir {
+			// add new directories to watcher
+			if fileEvent.Type == "create" && dirEvent.node.Type() == files.DIR {
 				logger.Trace(fmt.Sprintf("Watching new dir: %q", fileEvent.Name))
+				// TODO: is it necessary to do recursive calls here?
 				err := recursiveWatcherAdd(inner, fileEvent.Name)
 				if err != nil {
 					logger.Error(fmt.Sprintf("Failed to add %q to watcher.\n", fileEvent.Name))
 				}
 			}
 		case err, ok := <-inner.Errors:
-			if !ok {
+			if !ok { // channel closed
 				return
 			}
 			logger.Info(fmt.Sprintf("Error received:\n%v", err.Error()))
 		}
 	}
+}
+
+func updateStoreForLocalState(topDir string, dir ManagedDirectory, nodes []files.Node, store EventStore) (*Dir, error) {
+	// TODO: ignore events based on globs
+	dirName := filepath.Join(topDir, dir.Path)
+
+	newDir := &Dir{
+		Path:      dir.Path,
+		ExclGlobs: dir.Exclude,
+		InclGlobs: dir.Include,
+	}
+	newDir, err := store.AddDir(*newDir)
+	if err != nil {
+		logger.Error(fmt.Sprintf("Failed to add dir to event store:\n%s", err.Error()))
+		os.Exit(1)
+	}
+
+	// populate event logs w/ pseudos based on current state
+	for _, node := range nodes {
+		state := node.State()
+		event := &Event{
+			DirID:     newDir.ID,
+			Timestamp: time.Now(),
+			Path:      files.GetRelativePath(node.Path, dirName),
+			Type:      "create",
+			Size:      state.Size,
+			Hash:      state.Hash,
+			ModTime:   state.ModTime,
+		}
+
+		chain := &Chain{
+			DirID: newDir.ID,
+			Ino:   node.Ino(),
+		}
+
+		newChain, err := store.AddChain(*chain)
+		if err != nil {
+			logger.Error(fmt.Sprintf("Failed to add event to event store:\n%s", err.Error()))
+			os.Exit(1)
+		}
+
+		_, err = store.AddEvent(*event, newChain.ID)
+		if err != nil {
+			logger.Error(fmt.Sprintf("Failed to add event to event store:\n%s", err.Error()))
+			os.Exit(1)
+		}
+	}
+
+	return newDir, nil
 }
 
 func recursiveWatcherAdd(watcher *fsnotify.Watcher, path string) error {
@@ -202,70 +200,70 @@ func recursiveWatcherAdd(watcher *fsnotify.Watcher, path string) error {
 	return err
 }
 
-func handleEvent(dirEvent *dirEvent, store EventStore) (bool, error) {
+func handleEvent(dirEvent *dirEvent, store EventStore) error {
+	var err error
+
 	fileEvent := dirEvent.fileEvent
-	// lookup chain log for this event
-	chain, node, err := lkpChain(dirEvent, store)
+	// set node info on event
+	err = setNode(dirEvent)
 	if err != nil {
-		return false, errors.New(fmt.Sprintf("Failed to find lookup Chain for event:  %v", fileEvent))
+		return errors.New(fmt.Sprintf("Failed to set node for: %v", dirEvent))
+	}
+	// lookup chain log for this event
+	err = lkpChain(dirEvent, store)
+	if err != nil {
+		return errors.New(fmt.Sprintf("Failed to find lookup Chain for event:  %v", fileEvent))
 	}
 	// ignore invalid events for now
-	if !isValidEvent(dirEvent, chain, node) {
-		return false, errors.ErrUnsupported
+	if !isValidEvent(dirEvent) {
+		return errors.ErrUnsupported
 	}
-
 	// add new chain for new nodes
-	if fileEvent.Type == "create" && chain == nil {
-		// if we don't have a chain AND we don't have a node then something is wrong
-		if node == nil {
-			logger.Error(fmt.Sprintf("Failed to find node for create event %v", dirEvent))
-			os.Exit(1)
-		}
-
-		newChain := &Chain{
+	if fileEvent.Type == "create" && dirEvent.chain == nil {
+		// create and new chain
+		dirEvent.chain, err = store.AddChain(Chain{
 			DirID: dirEvent.dirID,
-			Ino:   node.Ino(),
-		}
-
-		newChain, err := store.AddChain(*newChain)
+			Ino:   dirEvent.node.Ino(),
+		})
 		if err != nil {
 			logger.Error(err.Error())
 			os.Exit(1)
 		}
-
-		chain = newChain
 	}
-
+	// create new event to store
 	event := Event{
 		DirID:     dirEvent.dirID,
 		Timestamp: fileEvent.Timestamp,
 		Path:      files.GetRelativePath(fileEvent.Name, dirEvent.dirName),
 		Type:      fileEvent.Type,
 	}
-
-	setEventState(&event, node)
-
-	_, err = store.AddEvent(event, chain.ID)
+	// set event state from node
+	setEventState(&event, dirEvent.node)
+	// add event to store
+	_, err = store.AddEvent(event, dirEvent.chain.ID)
 	if err != nil {
 		logger.Error(err.Error())
 		os.Exit(1)
 	}
-
+	// for debug
 	if fileEvent.Type == "remove" {
-		events, err := store.GetEventsInChain(chain.ID)
+		events, err := store.GetEventsInChain(dirEvent.chain.ID)
 		if err != nil {
 			logger.Debug(err.Error())
 		}
-		logger.Debug("=================================")
+		logger.Debug("========  CHAIN START =============")
 		for _, event := range events {
 			logger.Debug(fmt.Sprint(event))
 		}
+		logger.Debug("=========  CHAIN END  ============")
 	}
 
-	return fileEvent.Type == "create" && node.Type() == files.DIR, nil
+	return nil
 }
 
-func parseEvent(event *fsnotify.Event) *FileEvent {
+// toFileEvent constructs a FileEvent from an fsnotify.Event
+// it add a timestamp and returns nil if this isn't an event we care about
+func toFileEvent(event *fsnotify.Event) *FileEvent {
 	// init fileEvent
 	fileEvent := FileEvent{
 		Name:      event.Name,
@@ -288,68 +286,62 @@ func parseEvent(event *fsnotify.Event) *FileEvent {
 	return &fileEvent
 }
 
-func lkpChain(dirEvent *dirEvent, store EventStore) (*Chain, *files.Node, error) {
-	fileEvent := dirEvent.fileEvent
-
-	switch fileEvent.Type {
-	case "create":
-		node, err := files.NewNode(fileEvent.Name)
+// setNode sets the node property on the dirEvent struct
+// the node is used to: detect new dirs, lookup chains by ino, set event state
+func setNode(dirEvent *dirEvent) error {
+	switch dirEvent.fileEvent.Type {
+	case "create", "write":
+		node, err := files.NewNode(dirEvent.fileEvent.Name)
 		if err != nil {
-			return nil, node, err
+			return err
 		}
-		chain, err := store.GetChainByIno(node.Ino())
-		if err != nil {
-			return nil, node, err
-		}
-
-		return chain, node, nil
-	case "write":
-		node, err := files.NewNode(fileEvent.Name)
-		if err != nil {
-			return nil, node, err
-		}
-		chain, err := store.GetChainByIno(node.Ino())
-		if err != nil {
-			return nil, node, err
-		}
-		if chain == nil {
-			return nil, node, errors.New(fmt.Sprintf("No chain by ino on write event %+v\n%d", dirEvent, node.Ino()))
-		}
-
-		return chain, node, nil
-	case "remove":
-		chain, err := store.GetChainByPath(dirEvent.dirID, files.GetRelativePath(fileEvent.Name, dirEvent.dirName))
-		if err != nil {
-			return nil, nil, err
-		}
-		if chain == nil {
-			return nil, nil, errors.New(fmt.Sprintf("No chain by path on remove event %+v", dirEvent))
-		}
-
-		return chain, nil, nil
-	case "rename":
-		chain, err := store.GetChainByPath(dirEvent.dirID, files.GetRelativePath(fileEvent.Name, dirEvent.dirName))
-		if err != nil {
-			return nil, nil, err
-		}
-		if chain == nil {
-			return nil, nil, errors.New(fmt.Sprintf("No chain by path on remove event %+v", dirEvent))
-		}
-
-		return chain, nil, nil
-	default:
-		return nil, nil, errors.ErrUnsupported
+		dirEvent.node = node
+	case "rename", "remove":
+		return nil
 	}
+	return errors.ErrUnsupported
 }
 
-func isValidEvent(dirEvent *dirEvent, chain *Chain, node *files.Node) bool {
+// lkpChain finds a chain in the event store for a given event
+// it uses inode lookup for creates/writes and paths for rename/remove
+// in order to perform the inode lookup, lkpChain must go to the filesystem anyways
+// so this function is also responsible for retrieving and returning node state
+func lkpChain(dirEvent *dirEvent, store EventStore) error {
+	var chain *Chain
+	var err error
+
+	switch dirEvent.fileEvent.Type {
+	case "create", "write":
+		chain, err = store.GetChainByIno(dirEvent.node.Ino())
+		if err != nil {
+			return err
+		}
+	case "remove", "rename":
+		chain, err = store.GetChainByPath(
+			dirEvent.dirID,
+			files.GetRelativePath(dirEvent.fileEvent.Name, dirEvent.dirName),
+		)
+		if err != nil {
+			return err
+		}
+	default:
+		return errors.ErrUnsupported
+	}
+	dirEvent.chain = chain
+	return nil
+}
+
+// isValidEvent ensures dirEvent is properly initialized for processing
+func isValidEvent(dirEvent *dirEvent) bool {
+	node := dirEvent.node
+	chain := dirEvent.chain
 	switch dirEvent.fileEvent.Type {
 	case "create":
-		if node.Type() < 1 {
+		if node == nil || node.Type() < 1 {
 			return false
 		}
 	case "write":
-		if node.Type() < 1 {
+		if node == nil || node.Type() < 1 {
 			return false
 		}
 		if chain == nil {

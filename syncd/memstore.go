@@ -163,19 +163,18 @@ func (s *MemStore) GetEventsInChain(id uuid.UUID) ([]Event, error) {
 }
 
 func setChainTail(s *MemStore, memChain *MemChain, memEvent *MemEvent) error {
-	chainPathMap, ok := s.chainPathMap[memChain.Dir.ID]
+	_, ok := s.chainPathMap[memChain.Dir.ID]
 	if !ok {
-		chainPathMap = make(map[string]*MemChain)
-		s.chainPathMap[memChain.Dir.ID] = chainPathMap
+		s.chainPathMap[memChain.Dir.ID] = make(map[string]*MemChain)
 	}
 
 	if memChain.Tail != nil && memChain.Tail.Path != memEvent.Path {
 		// for events that change path names (renames)
 		// we need this map to be up to date
-		delete(chainPathMap, memChain.Tail.Path)
+		delete(s.chainPathMap[memChain.Dir.ID], memChain.Tail.Path)
 	}
 
-	chainPathMap[memEvent.Path] = memChain
+	s.chainPathMap[memChain.Dir.ID][memEvent.Path] = memChain
 
 	memChain.Tail = memEvent
 
@@ -215,7 +214,7 @@ func addChain(s *MemStore, chain Chain) (*Chain, error) {
 		return nil, errors.New(fmt.Sprintf("Cannot add new chain, non-nil ID %s", chain))
 	}
 
-	memDir, ok := getDirByUUID(s, chain.DirID)
+	_, ok := getDirByUUID(s, chain.DirID)
 	if !ok {
 		return nil, errors.New(fmt.Sprintf("Cannot add new chain, non-existant dir %s", chain.DirID))
 	}
@@ -230,7 +229,6 @@ func addChain(s *MemStore, chain Chain) (*Chain, error) {
 
 	s.chainIDMap[memChain.ID] = memChain
 	s.chainInoMap[memChain.Ino] = memChain
-	s.chainPathMap[memDir.ID] = make(map[string]*MemChain)
 
 	return &chain, nil
 }
@@ -250,11 +248,10 @@ func addEvent(s *MemStore, event Event, chainID uuid.UUID) (*Event, error) {
 	// 	return nil, errors.New(fmt.Sprintf("Cannot add new event, non-existent dir %s", event))
 	// }
 
-	eventPathMap, ok := s.eventPathMap[memChain.Dir.ID]
+	_, ok = s.eventPathMap[memChain.Dir.ID]
 	if !ok {
 		// this is a safety thing, maybe error?
-		eventPathMap = make(map[string]*MemEvent)
-		s.eventPathMap[memChain.Dir.ID] = eventPathMap
+		s.eventPathMap[memChain.Dir.ID] = make(map[string]*MemEvent)
 	}
 
 	memEvent, err := toMemEvent(s, &event)
@@ -266,7 +263,7 @@ func addEvent(s *MemStore, event Event, chainID uuid.UUID) (*Event, error) {
 	event.ID = memEvent.ID
 
 	s.eventIDMap[memEvent.ID] = memEvent
-	eventPathMap[memEvent.Path] = memEvent
+	s.eventPathMap[memChain.Dir.ID][memEvent.Path] = memEvent
 
 	if memChain.Head == nil { // first event on chain
 		// Tail should also be nil

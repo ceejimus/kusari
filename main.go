@@ -43,7 +43,12 @@ func main() {
 		}
 	}
 
-	watcher := syncd.InitWatcher(config.TopDir, config.ManagedDirectories, managedMap, store)
+	watcher, err := syncd.InitWatcher(config.TopDir, config.ManagedDirectories, managedMap, store)
+	if err != nil {
+		logger.Error(err.Error())
+		os.Exit(1) // TODO: gracefully handle these
+	}
+
 	go syncd.RunWatcher(watcher)
 
 	// db, err := initDb(config.DSN)
