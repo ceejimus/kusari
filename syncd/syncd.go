@@ -24,7 +24,7 @@ func GetManagedMap(topDir string, managedDirs []ManagedDirectory) (ManagedMap, e
 	managedMap := make(map[string][]files.Node)
 
 	for _, managedDir := range managedDirs {
-		managedFiles, err := getManagedNodes(topDir, managedDir)
+		managedFiles, err := GetManagedNodes(topDir, managedDir)
 		if err != nil {
 			return nil, err
 		}
@@ -35,7 +35,7 @@ func GetManagedMap(topDir string, managedDirs []ManagedDirectory) (ManagedMap, e
 	return managedMap, nil
 }
 
-func getManagedNodes(toDir string, managedDir ManagedDirectory) ([]files.Node, error) {
+func GetManagedNodes(toDir string, managedDir ManagedDirectory) ([]files.Node, error) {
 	managedFiles := make([]files.Node, 0)
 
 	inclGlobs := mapToGlobs(managedDir.Include)

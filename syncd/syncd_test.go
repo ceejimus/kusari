@@ -1,117 +1,33 @@
 package syncd
 
 import (
-	"errors"
-	"fmt"
-	"os"
 	"path/filepath"
 	"testing"
 
 	files "atmoscape.net/fileserver/fs"
+	"atmoscape.net/fileserver/utils"
 	"github.com/stretchr/testify/assert"
 )
 
-// TODO: add support for symlinks
-type TmpDir struct {
-	Top   bool
-	Path  string
-	Name  string
-	Dirs  []*TmpDir
-	Files []*TmpFile
-}
-
-type TmpFile struct {
-	Name    string
-	Path    string
-	Content []byte
-}
-
-func (d *TmpDir) Instantiate(parentDir string) (string, error) {
-	d.Top = false
-	if parentDir == "" {
-		tmpDir, err := os.MkdirTemp(parentDir, "*")
-		if err != nil {
-			return "", err
-		}
-		d.Top = true
-		parentDir = tmpDir
-	}
-
-	path := filepath.Join(parentDir, d.Name)
-	err := os.Mkdir(path, os.ModePerm)
-	if err != nil {
-		return "", err
-	}
-
-	d.Path = path
-
-	for _, tmpFile := range d.Files {
-		err := tmpFile.Instantiate(path)
-		if err != nil {
-			return "", err
-		}
-	}
-
-	for _, tmpDir := range d.Dirs {
-		_, err := tmpDir.Instantiate(path)
-		if err != nil {
-			return "", err
-		}
-	}
-
-	return parentDir, nil
-}
-
-func (d *TmpDir) Destroy() error {
-	if d.Top {
-		return os.RemoveAll(filepath.Join(d.Path, ".."))
-	}
-	return nil
-}
-
-func (f *TmpFile) Instantiate(dir string) error {
-	path := filepath.Join(dir, f.Name)
-
-	f.Path = path
-
-	handle, err := os.Create(path)
-	if err != nil {
-		return err
-	}
-
-	n, err := handle.Write(f.Content)
-	if err != nil {
-		return err
-	}
-	if n != int(f.Size()) {
-		return errors.New(fmt.Sprintf("Failed to write TmpFile.Content to %q | %d/%d bytes written.\n", path, n, f.Size()))
-	}
-
-	return nil
-}
-
-func (f *TmpFile) Size() int64 {
-	return int64(len(f.Content))
-}
-
-func helperTestGetManagedFiles(t *testing.T, tmpDir TmpDir, include []string, exclude []string, wanted []string) {
-	topdir, err := tmpDir.Instantiate("")
+func helperTestGetManagedFiles(t *testing.T, tmpDir utils.TmpDir, include []string, exclude []string, wanted []string) {
+	tmpFs := utils.TmpFs{Dirs: []*utils.TmpDir{&tmpDir}}
+	err := tmpFs.Instantiate()
 	if err != nil {
 		t.Error(err)
 	}
-	defer tmpDir.Destroy()
+	defer tmpFs.Destroy()
 
 	managedDir := ManagedDirectory{
 		Path:    tmpDir.Name,
 		Include: include,
 		Exclude: exclude,
 	}
-	managedFiles, err := getManagedNodes(topdir, managedDir)
+	managedFiles, err := GetManagedNodes(tmpFs.Path, managedDir)
 
 	got := make([]string, len(managedFiles))
 
 	for i, managedFile := range managedFiles {
-		got[i] = files.GetRelativePath(managedFile.Path, tmpDir.Path)
+		got[i] = files.GetRelativePath(managedFile.Path, filepath.Join(tmpFs.Path, managedDir.Path))
 	}
 
 	assert.ElementsMatch(t, wanted, got)
@@ -120,10 +36,10 @@ func helperTestGetManagedFiles(t *testing.T, tmpDir TmpDir, include []string, ex
 func TestGetManagedFilesEmptyDir(t *testing.T) {
 	wanted := []string{}
 
-	tmpDir := TmpDir{
+	tmpDir := utils.TmpDir{
 		Name:  "d1",
-		Dirs:  make([]*TmpDir, 0),
-		Files: make([]*TmpFile, 0),
+		Dirs:  make([]*utils.TmpDir, 0),
+		Files: make([]*utils.TmpFile, 0),
 	}
 
 	include := []string{}
@@ -139,22 +55,13 @@ func TestGetManagedFiles(t *testing.T) {
 		"f3.txt",
 	}
 
-	tmpDir := TmpDir{
+	tmpDir := utils.TmpDir{
 		Name: "d1",
-		Dirs: make([]*TmpDir, 0),
-		Files: []*TmpFile{
-			{
-				Name:    "f1.txt",
-				Content: []byte("i am f1"),
-			},
-			{
-				Name:    "f2.txt",
-				Content: []byte("i am f2"),
-			},
-			{
-				Name:    "f3.txt",
-				Content: []byte("i am f3"),
-			},
+		Dirs: make([]*utils.TmpDir, 0),
+		Files: []*utils.TmpFile{
+			{Name: "f1.txt", Content: []byte("i am f1")},
+			{Name: "f2.txt", Content: []byte("i am f2")},
+			{Name: "f3.txt", Content: []byte("i am f3")},
 		},
 	}
 
@@ -169,22 +76,13 @@ func TestGetManagedFilesIncludeGlob(t *testing.T) {
 		"f1.txt",
 	}
 
-	tmpDir := TmpDir{
+	tmpDir := utils.TmpDir{
 		Name: "d1",
-		Dirs: make([]*TmpDir, 0),
-		Files: []*TmpFile{
-			{
-				Name:    "f1.txt",
-				Content: []byte("i am f1"),
-			},
-			{
-				Name:    "bits.dat",
-				Content: []byte("i am bits"),
-			},
-			{
-				Name:    "bad.txt",
-				Content: []byte("i am f3"),
-			},
+		Dirs: make([]*utils.TmpDir, 0),
+		Files: []*utils.TmpFile{
+			{Name: "f1.txt", Content: []byte("i am f1")},
+			{Name: "bits.dat", Content: []byte("i am bits")},
+			{Name: "bad.txt", Content: []byte("i am f3")},
 		},
 	}
 
@@ -199,22 +97,13 @@ func TestGetManagedFilesExcludeGlob(t *testing.T) {
 		"f1.txt",
 	}
 
-	tmpDir := TmpDir{
+	tmpDir := utils.TmpDir{
 		Name: "d1",
-		Dirs: make([]*TmpDir, 0),
-		Files: []*TmpFile{
-			{
-				Name:    "f1.txt",
-				Content: []byte("i am f1"),
-			},
-			{
-				Name:    "bits.dat",
-				Content: []byte("i am bits"),
-			},
-			{
-				Name:    "bad.txt",
-				Content: []byte("i am f3"),
-			},
+		Dirs: make([]*utils.TmpDir, 0),
+		Files: []*utils.TmpFile{
+			{Name: "f1.txt", Content: []byte("i am f1")},
+			{Name: "bits.dat", Content: []byte("i am bits")},
+			{Name: "bad.txt", Content: []byte("i am f3")},
 		},
 	}
 
@@ -229,26 +118,14 @@ func TestGetManagedFilesIncludeExcludeGlob(t *testing.T) {
 		"f1.txt",
 	}
 
-	tmpDir := TmpDir{
+	tmpDir := utils.TmpDir{
 		Name: "d1",
-		Dirs: make([]*TmpDir, 0),
-		Files: []*TmpFile{
-			{
-				Name:    "f1.txt",
-				Content: []byte("i am f1"),
-			},
-			{
-				Name:    "f2.txt",
-				Content: []byte("i am f2"),
-			},
-			{
-				Name:    "bits.dat",
-				Content: []byte("i am bits"),
-			},
-			{
-				Name:    "bad.txt",
-				Content: []byte("i am f3"),
-			},
+		Dirs: make([]*utils.TmpDir, 0),
+		Files: []*utils.TmpFile{
+			{Name: "f1.txt", Content: []byte("i am f1")},
+			{Name: "f2.txt", Content: []byte("i am f2")},
+			{Name: "bits.dat", Content: []byte("i am bits")},
+			{Name: "bad.txt", Content: []byte("i am f3")},
 		},
 	}
 
@@ -272,57 +149,39 @@ func TestGetManagedFilesSubDirs(t *testing.T) {
 		"sub3/sub4",
 	}
 
-	tmpDir := TmpDir{
+	tmpDir := utils.TmpDir{
 		Name: "d1",
-		Dirs: []*TmpDir{
+		Dirs: []*utils.TmpDir{
 			{
 				Name: "sub1",
-				Files: []*TmpFile{
-					{
-						Name:    "f1.txt",
-						Content: []byte("i am sub1/f1"),
-					},
+				Files: []*utils.TmpFile{
+					{Name: "f1.txt", Content: []byte("i am sub1/f1")},
 				},
 			},
 			{
 				Name: "sub2",
-				Files: []*TmpFile{
-					{
-						Name:    "f2.txt",
-						Content: []byte("i am sub2/f2"),
-					},
+				Files: []*utils.TmpFile{
+					{Name: "f2.txt", Content: []byte("i am sub2/f2")},
 				},
 			},
 			{
 				Name: "sub3",
-				Dirs: []*TmpDir{
+				Dirs: []*utils.TmpDir{
 					{
 						Name: "sub4",
-						Files: []*TmpFile{
-							{
-								Name:    "f5.txt",
-								Content: []byte("i am sub5/f5"),
-							},
+						Files: []*utils.TmpFile{
+							{Name: "f5.txt", Content: []byte("i am sub5/f5")},
 						},
 					},
 				},
-				Files: []*TmpFile{
-					{
-						Name:    "f3.txt",
-						Content: []byte("i am sub3/f3"),
-					},
+				Files: []*utils.TmpFile{
+					{Name: "f3.txt", Content: []byte("i am sub3/f3")},
 				},
 			},
 		},
-		Files: []*TmpFile{
-			{
-				Name:    "f1.txt",
-				Content: []byte("i am f1"),
-			},
-			{
-				Name:    "f2.txt",
-				Content: []byte("i am f2"),
-			},
+		Files: []*utils.TmpFile{
+			{Name: "f1.txt", Content: []byte("i am f1")},
+			{Name: "f2.txt", Content: []byte("i am f2")},
 		},
 	}
 
@@ -343,57 +202,38 @@ func TestGetManagedFilesSubDirsIncludeExcludeGlob(t *testing.T) {
 		"sub3",
 	}
 
-	tmpDir := TmpDir{
+	tmpDir := utils.TmpDir{
 		Name: "d1",
-		Dirs: []*TmpDir{
+		Dirs: []*utils.TmpDir{
 			{
 				Name: "sub1",
-				Files: []*TmpFile{
-					{
-						Name:    "f1.txt",
-						Content: []byte("i am sub1/f1"),
-					},
+				Files: []*utils.TmpFile{
+					{Name: "f1.txt", Content: []byte("i am sub1/f1")},
 				},
 			},
 			{
-				Name: "sub2",
-				Files: []*TmpFile{
-					{
-						Name:    "bits.dat",
-						Content: []byte("1010011010"),
-					},
+				Name: "sub2", Files: []*utils.TmpFile{
+					{Name: "bits.dat", Content: []byte("1010011010")},
 				},
 			},
 			{
 				Name: "sub3",
-				Dirs: []*TmpDir{
+				Dirs: []*utils.TmpDir{
 					{
 						Name: "sub4",
-						Files: []*TmpFile{
-							{
-								Name:    "f5.txt",
-								Content: []byte("i am sub5/f5"),
-							},
+						Files: []*utils.TmpFile{
+							{Name: "f5.txt", Content: []byte("i am sub5/f5")},
 						},
 					},
 				},
-				Files: []*TmpFile{
-					{
-						Name:    "f3.txt",
-						Content: []byte("i am sub3/f3"),
-					},
+				Files: []*utils.TmpFile{
+					{Name: "f3.txt", Content: []byte("i am sub3/f3")},
 				},
 			},
 		},
-		Files: []*TmpFile{
-			{
-				Name:    "f1.txt",
-				Content: []byte("i am f1"),
-			},
-			{
-				Name:    "f2.txt",
-				Content: []byte("i am f2"),
-			},
+		Files: []*utils.TmpFile{
+			{Name: "f1.txt", Content: []byte("i am f1")},
+			{Name: "f2.txt", Content: []byte("i am f2")},
 		},
 	}
 

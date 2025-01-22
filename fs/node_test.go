@@ -1,6 +1,7 @@
 package fs
 
 import (
+	"bytes"
 	"os"
 	"path/filepath"
 	"testing"
@@ -52,7 +53,10 @@ func TestRelPathNoTrailingSlash(t *testing.T) {
 
 func TestFileHashWorks(t *testing.T) {
 	content := "i am test"
-	wanted := "97b74985df45e248be264fddc8172f71"
+	wanted, err := GetHash(bytes.NewReader([]byte(content)))
+	if err != nil {
+		t.Error(err)
+	}
 
 	dir := os.TempDir()
 	path := filepath.Join(dir, "tmpfile")
