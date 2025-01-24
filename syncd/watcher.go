@@ -100,12 +100,13 @@ func RunWatcher(watcher *Watcher) {
 			if !ok { // channel closed
 				return
 			}
-			// transform fsnotify event into local node event
+			logger.Trace(fmt.Sprintf("Received watcher event %s", event))
+			// transform fstify event into local node event
 			fileEvent := toFileEvent(&event)
 			if fileEvent == nil { // ignored event
 				continue
 			}
-			watcher.processedChanTx <- *fileEvent
+
 			// lookup managed directory by event name
 			dirPath, dir := watcher.getDirForEvent(event.Name)
 			if dirPath == nil {
@@ -118,16 +119,23 @@ func RunWatcher(watcher *Watcher) {
 				dirName:   filepath.Join(watcher.topDir, *dirPath),
 				fileEvent: fileEvent,
 			}
+
 			// handle this event
 			err := handleEvent(&dirEvent, watcher.store)
 			if err != nil {
 				logger.Error(fmt.Sprintf("Failed to handle fsnotify event:\n%v\n", err.Error()))
 			}
+			watcher.processedChanTx <- *fileEvent
 			// add new directories to watcher
 			if fileEvent.Type == "create" && dirEvent.node.Type() == files.DIR {
 				logger.Trace(fmt.Sprintf("Watching new dir: %q", fileEvent.Name))
 				// TODO: is it necessary to do recursive calls here?
 				err := recursiveWatcherAdd(inner, fileEvent.Name)
+				if err != nil {
+					logger.Error(fmt.Sprintf("Failed to add %q to watcher.\n", fileEvent.Name))
+				}
+			} else if fileEvent.Type == "rename" || fileEvent.Type == "remove" {
+				err := recursiveWatcherRemove(inner, fileEvent.Name)
 				if err != nil {
 					logger.Error(fmt.Sprintf("Failed to add %q to watcher.\n", fileEvent.Name))
 				}
@@ -213,6 +221,15 @@ func recursiveWatcherAdd(watcher *fsnotify.Watcher, path string) error {
 	return err
 }
 
+func recursiveWatcherRemove(watcher *fsnotify.Watcher, path string) error {
+	for _, watched := range watcher.WatchList() {
+		if watched == path {
+			return watcher.Remove(path)
+		}
+	}
+	return nil
+}
+
 func handleEvent(dirEvent *DirEvent, store EventStore) error {
 	var err error
 
@@ -252,11 +269,11 @@ func handleEvent(dirEvent *DirEvent, store EventStore) error {
 	setEventState(&event, dirEvent.node)
 	// add event to store
 	_, err = store.AddEvent(event, dirEvent.chain.ID)
+
 	if err != nil {
 		logger.Error(err.Error())
 		os.Exit(1)
 	}
-
 	return nil
 }
 
@@ -296,9 +313,11 @@ func setNode(dirEvent *DirEvent) error {
 		}
 		dirEvent.node = node
 	case "rename", "remove":
-		return nil
+	default:
+		return errors.ErrUnsupported
 	}
-	return errors.ErrUnsupported
+
+	return nil
 }
 
 // lkpChain finds a chain in the event store for a given event

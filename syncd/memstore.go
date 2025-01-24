@@ -3,15 +3,28 @@ package syncd
 import (
 	"errors"
 	"fmt"
+	"path/filepath"
 	"time"
 
 	"github.com/google/uuid"
 )
 
+type dirIDMap map[uuid.UUID]*MemDir
+type chainIDMap map[uuid.UUID]*MemChain
+type eventIDMap map[uuid.UUID]*MemEvent
+
+type dirPathMap map[string]*MemDir
+
+type chainMap map[string]*MemChain
+type chainPathLkp map[uuid.UUID]chainMap
+
+type chainInoMap map[uint64]*MemChain
+
 type MemDir struct {
-	ID     uuid.UUID // should be generated when adding
-	Path   string    // relative to configured top-level directory
-	Chains []*MemChain
+	ID       uuid.UUID // should be generated when adding
+	Path     string    // relative to configured top-level directory
+	Chains   []*MemChain
+	ChainLkp chainPathLkp
 }
 
 type MemChain struct {
@@ -35,35 +48,135 @@ type MemEvent struct {
 	Prev      *MemEvent // previous event for this node
 }
 
-type DirIDMap map[uuid.UUID]*MemDir
-type ChainIDMap map[uuid.UUID]*MemChain
-type EventIDMap map[uuid.UUID]*MemEvent
-
-type DirPathMap map[string]*MemDir
-type ChainPathMap map[uuid.UUID]map[string]*MemChain
-type EventPathMap map[uuid.UUID]map[string]*MemEvent
-
-type ChainInoMap map[uint64]*MemChain
-
 type MemStore struct {
-	dirIDMap     DirIDMap
-	dirPathMap   DirPathMap
-	chainIDMap   ChainIDMap
-	chainPathMap ChainPathMap
-	chainInoMap  ChainInoMap
-	eventIDMap   EventIDMap
-	eventPathMap EventPathMap
+	dirIDMap    dirIDMap
+	dirPathMap  dirPathMap
+	chainIDMap  chainIDMap
+	chainInoMap chainInoMap
+	eventIDMap  eventIDMap
+}
+
+func (lkp chainPathLkp) get(path string) (*MemChain, bool) {
+	// get parent dir path and node name
+	dir, name := filepath.Split(path)
+	// lookup chain map for dir
+	chMap, ok := lkp.getChainMap(dir)
+	if !ok {
+		return nil, false
+	}
+	// get chain for node
+	chain, ok := chMap[name]
+	// return
+	return chain, ok
+}
+
+func (lkp chainPathLkp) add(path string, chain *MemChain) error {
+	// get parent dir path and node name
+	dir, name := filepath.Split(path)
+	// lookup chain map for dir
+	chMap, ok := lkp.getChainMap(dir)
+	if !ok {
+		return errors.New(fmt.Sprintf("No chain map for: %q", dir))
+	}
+	// error if we already have this node
+	_, ok = chMap[name]
+	if ok {
+		return errors.New(fmt.Sprintf("Lkp for path already exists for %q", path))
+	}
+	// add chain record from name -> chain
+	chMap[name] = chain
+	// create new chain map in lkp for node
+	lkp[chain.ID] = make(chainMap)
+	// return
+	return nil
+}
+
+func (lkp chainPathLkp) move(dstPath string, srcPath string) error {
+	// get parent dir and name for dst
+	dstDir, dstName := filepath.Split(dstPath)
+	// get parent dir and name for src
+	srcDir, srcName := filepath.Split(srcPath)
+	// lookup chain map for dst parent dir
+	dstChainMap, ok := lkp.getChainMap(dstDir)
+	if !ok {
+		return errors.New(fmt.Sprintf("Failed to find chain map for dstPath parent dir: %q", dstDir))
+	}
+	// lookup chain map for src parent dir
+	srcChainMap, ok := lkp.getChainMap(srcDir)
+	if !ok {
+		return errors.New(fmt.Sprintf("Failed to find chain map for srcPath parent dir: %q", srcDir))
+	}
+	// get the chain we're moving from parent and delete the key
+	mvChain, ok := srcChainMap[srcName]
+	if !ok {
+		return errors.New(fmt.Sprintf("Failed to find chain for path: %q", dstPath))
+	}
+	delete(srcChainMap, srcName)
+	// set the chain in the destination map
+	dstChainMap[dstName] = mvChain
+	// return
+	return nil
+}
+
+func (lkp chainPathLkp) delete(path string) error {
+	// get parent dir path and node name
+	dir, name := filepath.Split(path)
+	// lookup chain map for dir
+	chMap, ok := lkp.getChainMap(dir)
+	if !ok {
+		return errors.New(fmt.Sprintf("No chain map for: %q", dir))
+	}
+	// delete chain record from map
+	delete(chMap, name)
+	// return
+	return nil
+}
+
+func (lkp chainPathLkp) getChainMap(path string) (chainMap, bool) {
+	var found chainMap
+	var ok bool
+	// start w/ root chain map
+	found, ok = lkp[uuid.Nil]
+	if !ok {
+		return nil, false
+	}
+	// if path is empty assume they want the root node
+	if path == "" {
+		return found, true
+	}
+	// iterate over path components
+	pathParts := splitPath(path)
+	for _, pathPart := range pathParts {
+		// find the chain for this part
+		lkpChain, ok := found[pathPart]
+		if !ok {
+			return nil, false
+		}
+		// use that chain ID as lookup for its chain map
+		found, ok = lkp[lkpChain.ID]
+		if !ok {
+			return nil, false
+		}
+	}
+	// return
+	return found, true
+}
+
+func splitPath(path string) []string {
+	if dir, name := filepath.Split(filepath.Clean(path)); dir == "" {
+		return []string{name}
+	} else {
+		return append(splitPath(dir), name)
+	}
 }
 
 func NewMemStore() *MemStore {
 	return &MemStore{
-		dirIDMap:     make(DirIDMap),
-		dirPathMap:   make(DirPathMap),
-		chainIDMap:   make(ChainIDMap),
-		chainPathMap: make(ChainPathMap),
-		chainInoMap:  make(ChainInoMap),
-		eventIDMap:   make(EventIDMap),
-		eventPathMap: make(EventPathMap),
+		dirIDMap:    make(dirIDMap),
+		dirPathMap:  make(dirPathMap),
+		chainIDMap:  make(chainIDMap),
+		chainInoMap: make(chainInoMap),
+		eventIDMap:  make(eventIDMap),
 	}
 }
 
@@ -179,13 +292,13 @@ func addDir(s *MemStore, dir Dir) (*Dir, error) {
 	memDir := toMemDir(&dir)
 	memDir.ID = uuid.New()
 	memDir.Chains = make([]*MemChain, 0)
+	memDir.ChainLkp = make(chainPathLkp)
+	memDir.ChainLkp[uuid.Nil] = make(chainMap)
 
 	dir.ID = memDir.ID
 
 	s.dirIDMap[memDir.ID] = memDir
 	s.dirPathMap[memDir.Path] = memDir
-	s.eventPathMap[memDir.ID] = make(map[string]*MemEvent)
-	s.chainPathMap[memDir.ID] = make(map[string]*MemChain)
 
 	return &dir, nil
 }
@@ -232,12 +345,6 @@ func addEvent(s *MemStore, event Event, chainID uuid.UUID) (*Event, error) {
 		return nil, errors.New(fmt.Sprintf("Cannot add new event, non-existent chain: %s", chainID))
 	}
 
-	_, ok = s.eventPathMap[memChain.Dir.ID]
-	if !ok {
-		// this is a safety thing, maybe error?
-		s.eventPathMap[memChain.Dir.ID] = make(map[string]*MemEvent)
-	}
-
 	memEvent, err := toMemEvent(&event)
 	if err != nil {
 		return nil, err
@@ -249,7 +356,6 @@ func addEvent(s *MemStore, event Event, chainID uuid.UUID) (*Event, error) {
 	event.ID = memEvent.ID
 
 	s.eventIDMap[memEvent.ID] = memEvent
-	s.eventPathMap[memChain.Dir.ID][memEvent.Path] = memEvent
 
 	if memChain.Head == nil { // first event on chain
 		// Tail should also be nil
@@ -259,7 +365,7 @@ func addEvent(s *MemStore, event Event, chainID uuid.UUID) (*Event, error) {
 		memChain.Tail.Next = memEvent
 	}
 
-	err = setChainTail(s, memChain, memEvent)
+	err = setChainTail(memChain, memEvent)
 	if err != nil {
 		return nil, err
 	}
@@ -267,19 +373,20 @@ func addEvent(s *MemStore, event Event, chainID uuid.UUID) (*Event, error) {
 	return &event, nil
 }
 
-func setChainTail(s *MemStore, memChain *MemChain, memEvent *MemEvent) error {
-	_, ok := s.chainPathMap[memChain.Dir.ID]
-	if !ok {
-		s.chainPathMap[memChain.Dir.ID] = make(map[string]*MemChain)
+func setChainTail(memChain *MemChain, memEvent *MemEvent) error {
+	// sprinkle some fairy dust for path lookups after renames
+	if memEvent.Type == "create" && memChain.Tail != nil && memChain.Tail.Type == "rename" {
+		if err := memChain.Dir.ChainLkp.move(memEvent.Path, memChain.Tail.Path); err != nil {
+			return err
+		}
+	} else {
+		_, ok := memChain.Dir.ChainLkp.get(memEvent.Path)
+		if !ok {
+			if err := memChain.Dir.ChainLkp.add(memEvent.Path, memChain); err != nil {
+				return err
+			}
+		}
 	}
-
-	if memChain.Tail != nil && memChain.Tail.Path != memEvent.Path {
-		// for events that change path names (renames)
-		// we need this map to be up to date
-		delete(s.chainPathMap[memChain.Dir.ID], memChain.Tail.Path)
-	}
-
-	s.chainPathMap[memChain.Dir.ID][memEvent.Path] = memChain
 
 	memChain.Tail = memEvent
 
@@ -297,7 +404,11 @@ func getChainByUUID(s *MemStore, id uuid.UUID) (*MemChain, bool) {
 }
 
 func getChainByPath(s *MemStore, dirID uuid.UUID, path string) (*MemChain, bool) {
-	memChain, ok := s.chainPathMap[dirID][path]
+	dir, ok := s.dirIDMap[dirID]
+	if !ok {
+		return nil, false
+	}
+	memChain, ok := dir.ChainLkp.get(path)
 	return memChain, ok
 }
 

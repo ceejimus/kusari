@@ -8,8 +8,9 @@ import (
 )
 
 type TmpFs struct {
-	Dirs []*TmpDir
-	Path string
+	Dirs      []*TmpDir
+	Path      string
+	generated bool
 }
 
 type TmpDir struct {
@@ -26,15 +27,17 @@ type TmpFile struct {
 func (f *TmpFs) Instantiate() error {
 	var err error
 	if f.Path == "" {
+		f.generated = true
 		f.Path, err = os.MkdirTemp("", "*")
 		if err != nil {
 			return err
 		}
 	} else {
 		_, err := os.Lstat(f.Path)
-		if err != nil {
-			os.RemoveAll(f.Path)
+		if err == nil {
+			removeDirectoryContents(f.Path)
 		} else if os.IsNotExist(err) {
+			os.MkdirAll(f.Path, 0770)
 		} else {
 			return err
 		}
@@ -51,7 +54,10 @@ func (f *TmpFs) Instantiate() error {
 }
 
 func (f *TmpFs) Destroy() error {
-	return os.RemoveAll(filepath.Join(f.Path, ".."))
+	if f.generated {
+		return os.RemoveAll(filepath.Join(f.Path, ".."))
+	}
+	return nil
 }
 
 func (f *TmpFs) NodeCount() int {
@@ -125,4 +131,24 @@ func (f *TmpFile) Instantiate(parentPath string) error {
 
 func (f *TmpFile) Size() int64 {
 	return int64(len(f.Content))
+}
+
+func removeDirectoryContents(path string) error {
+	// Read the directory contents
+	entries, err := os.ReadDir(path)
+	if err != nil {
+		return err
+	}
+
+	// Iterate over the entries and remove each one
+	for _, entry := range entries {
+		entryPath := filepath.Join(path, entry.Name())
+
+		// Remove the entry (file or directory)
+		if err := os.RemoveAll(entryPath); err != nil {
+			return err
+		}
+	}
+
+	return nil
 }

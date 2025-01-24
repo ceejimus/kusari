@@ -3,17 +3,14 @@ package fs
 import (
 	"crypto/md5"
 	"encoding/hex"
-	"fmt"
 	"io"
 	"os"
-	"strings"
+	"path/filepath"
 )
 
 func GetRelativePath(fullPath string, relDir string) string {
-	if !strings.HasSuffix(relDir, "/") {
-		relDir = fmt.Sprintf("%v/", relDir)
-	}
-	return strings.Replace(fullPath, relDir, "", 1)
+	relPath, _ := filepath.Rel(relDir, fullPath)
+	return relPath
 }
 
 func FileHash(path string) (string, error) {

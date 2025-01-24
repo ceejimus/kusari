@@ -1,6 +1,7 @@
 package utils
 
 import (
+	"bytes"
 	"errors"
 	"fmt"
 	"io"
@@ -16,6 +17,8 @@ const (
 	COPY
 	REMOVE
 	MOVE
+	MKDIR
+	RMDIR
 )
 
 type FsAction struct {
@@ -34,9 +37,13 @@ func (a *FsAction) Take() error {
 	case COPY:
 		return copyFile(a.DstPath, a.SrcPath)
 	case MOVE:
-		return moveFile(a.DstPath, a.SrcPath)
+		return moveNode(a.DstPath, a.SrcPath)
 	case REMOVE:
-		return removeFile(a.SrcPath)
+		return removeFile(a.DstPath)
+	case MKDIR:
+		return mkDir(a.DstPath)
+	case RMDIR:
+		return rmDir(a.DstPath)
 	}
 
 	return errors.New(fmt.Sprintf("unexpected utils.ActionKind: %#v", a.Kind))
@@ -62,42 +69,21 @@ func touchFile(path string) error {
 }
 
 func writeFile(path string, content []byte) error {
-	var f *os.File
-	var err error
-	_, err = os.Stat(path)
-	if err == nil { // existing file
-		f, err = os.Open(path)
-		if err != nil {
-			return err
-		}
-	} else if os.IsNotExist(err) { // non-existent file
-		f, err = os.Create(path)
-		if err != nil {
-			return err
-		}
-	} else {
+	f, err := openFileAppendOrCreate(path)
+	if err != nil {
 		return err
 	}
 	defer f.Close()
 
-	for {
-		n, err := f.Write(content)
-		if err != nil {
-			if err == io.EOF {
-				return nil
-			}
-			return err
-		}
-		content = content[n:]
-	}
-}
-
-func moveFile(dst string, src string) error {
-	if err := copyFile(dst, src); err != nil {
+	buf := bytes.NewReader(content)
+	if _, err := io.Copy(f, buf); err != nil {
 		return err
 	}
+	return nil
+}
 
-	if err := removeFile(src); err != nil {
+func moveNode(dst string, src string) error {
+	if err := os.Rename(src, dst); err != nil {
 		return err
 	}
 
@@ -116,7 +102,7 @@ func copyFile(dst string, src string) error {
 	}
 	defer fsrc.Close()
 
-	fdst, err := os.Create(dst)
+	fdst, err := openFileAppendOrCreate(dst)
 	if err != nil {
 		return err
 	}
@@ -135,4 +121,38 @@ func removeFile(path string) error {
 	}
 
 	return nil
+}
+
+func mkDir(path string) error {
+	if err := os.MkdirAll(path, 0770); err != nil {
+		return err
+	}
+	return nil
+}
+
+func rmDir(path string) error {
+	if err := os.Remove(path); err != nil {
+		return err
+	}
+	return nil
+}
+
+func openFileAppendOrCreate(path string) (*os.File, error) {
+	var f *os.File
+	var err error
+	_, err = os.Stat(path)
+	if err == nil { // existing file
+		f, err = os.OpenFile(path, os.O_APPEND|os.O_WRONLY, 0644)
+		if err != nil {
+			return nil, err
+		}
+	} else if os.IsNotExist(err) { // non-existent file
+		f, err = os.Create(path)
+		if err != nil {
+			return nil, err
+		}
+	} else {
+		return nil, err
+	}
+	return f, nil
 }
