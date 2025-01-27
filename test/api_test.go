@@ -1,7 +1,6 @@
 package test
 
 import (
-	// "atmoscape.net/fileserver/syncd"
 	"bytes"
 	"errors"
 	"fmt"
@@ -14,6 +13,7 @@ import (
 	"atmoscape.net/fileserver/logger"
 	"atmoscape.net/fileserver/syncd"
 	"atmoscape.net/fileserver/utils"
+	"github.com/stretchr/testify/assert"
 	"golang.org/x/sys/unix"
 )
 
@@ -21,6 +21,11 @@ type ApiTestWrapper struct {
 	watcher *syncd.Watcher
 	store   syncd.EventStore
 }
+
+type Chain []syncd.Event                                 // a chain of events
+type Chains []Chain                                      // a slice of chains expected (given a final path)
+type TailPathToChainMap map[string]Chains                // a map of final paths to expected chains
+type DirPathToTailChainMap map[string]TailPathToChainMap // a map of dir names to path -> chains lookup
 
 func TestMain(m *testing.M) {
 	setup()
@@ -47,81 +52,28 @@ func setup() {
 	DIR_BLOCK_SIZE = uint64(statfs.Bsize)
 }
 
-// test a create, write, rename, remove flow for single file
-func TestSingleFileCWRR(t *testing.T) {
-	content := []byte("I am Weasel!")
-	hash, err := files.GetHash(bytes.NewBuffer(content))
-	if err != nil {
-		t.Fatal(err)
-	}
-
-	wantedMap := make(map[string]map[string][]syncd.Event)
-	wantedMap["d"] = make(map[string][]syncd.Event)
-	wantedMap["d"]["b"] = []syncd.Event{
-		{
-			Path: "a",
-			Type: "create",
-			Size: 0,
-		},
-		{
-			Path: "a",
-			Type: "write",
-			Size: uint64(len(content)),
-			Hash: &hash,
-		},
-		{
-			Path: "a",
-			Type: "rename",
-		},
-		{
-			Path: "b",
-			Type: "create",
-			Size: uint64(len(content)),
-			Hash: &hash,
-		},
-		{
-			Path: "b",
-			Type: "remove",
-		},
-	}
-
-	tmpDir := utils.TmpDir{
-		Name: "d",
-		Dirs: make([]*utils.TmpDir, 0),
-	}
-
-	tmpFs := utils.TmpFs{Path: "../.data/tmp/", Dirs: []*utils.TmpDir{&tmpDir}}
-
-	actions := []utils.FsAction{
-		{Kind: utils.TOUCH, DstPath: "d/a"},
-		{Kind: utils.WRITE, Content: content, DstPath: "d/a"},
-		{Kind: utils.MOVE, SrcPath: "d/a", DstPath: "d/b"},
-		{Kind: utils.REMOVE, DstPath: "d/b"},
-	}
-
-	runApiTest(t, &tmpFs, actions, wantedMap)
-}
-
 // test a remove for a single file
-func TestExistingFileRemove(t *testing.T) {
+func TestFileRemove(t *testing.T) {
 	content := []byte("i am a")
 	hash, err := files.GetHash(bytes.NewBuffer(content))
 	if err != nil {
 		t.Fatal(err)
 	}
 
-	wantedMap := make(map[string]map[string][]syncd.Event)
-	wantedMap["d"] = make(map[string][]syncd.Event)
-	wantedMap["d"]["a"] = []syncd.Event{
-		{
-			Path: "a",
-			Type: "create",
-			Size: uint64(len(content)),
-			Hash: &hash,
-		},
-		{
-			Path: "a",
-			Type: "remove",
+	wantedMap := make(DirPathToTailChainMap)
+	wantedMap["d"] = make(TailPathToChainMap)
+	wantedMap["d"]["a"] = Chains{
+		Chain{
+			{
+				Path: "a",
+				Type: "create",
+				Size: uint64(len(content)),
+				Hash: &hash,
+			},
+			{
+				Path: "a",
+				Type: "remove",
+			},
 		},
 	}
 
@@ -142,39 +94,100 @@ func TestExistingFileRemove(t *testing.T) {
 	runApiTest(t, &tmpFs, actions, wantedMap)
 }
 
-// test creating a file w/ same old path as renamed file
-func TestTouchMovedFilename(t *testing.T) {
-	wantedMap := make(map[string]map[string][]syncd.Event)
-	wantedMap["d"] = make(map[string][]syncd.Event)
-	wantedMap["d"]["b"] = []syncd.Event{
-		{
-			Path: "a",
-			Type: "create",
-			Size: 0,
-		},
-		{
-			Path: "a",
-			Type: "rename",
-		},
-		{
-			Path: "b",
-			Type: "create",
-			Size: 0,
-		},
-		{
-			Path: "b",
-			Type: "remove",
+// test a create, write, rename, remove flow for single file
+func TestSingleFileCWRR(t *testing.T) {
+	content := []byte("I am Weasel!")
+	hash, err := files.GetHash(bytes.NewBuffer(content))
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	wantedMap := make(DirPathToTailChainMap)
+	wantedMap["d"] = make(TailPathToChainMap)
+	wantedMap["d"]["b"] = Chains{
+		Chain{
+			{
+				Path: "a",
+				Type: "create",
+				Size: 0,
+			},
+			{
+				Path: "a",
+				Type: "write",
+				Size: uint64(len(content)),
+				Hash: &hash,
+			},
+			{
+				Path: "a",
+				Type: "rename",
+			},
+			{
+				Path: "b",
+				Type: "create",
+				Size: uint64(len(content)),
+				Hash: &hash,
+			},
+			{
+				Path: "b",
+				Type: "remove",
+			},
 		},
 	}
-	wantedMap["d"]["a"] = []syncd.Event{
-		{
-			Path: "a",
-			Type: "create",
-			Size: 0,
+
+	tmpDir := utils.TmpDir{
+		Name: "d",
+		Dirs: make([]*utils.TmpDir, 0),
+	}
+
+	tmpFs := utils.TmpFs{Path: "../.data/tmp/", Dirs: []*utils.TmpDir{&tmpDir}}
+
+	actions := []utils.FsAction{
+		{Kind: utils.TOUCH, DstPath: "d/a"},
+		{Kind: utils.WRITE, Content: content, DstPath: "d/a"},
+		{Kind: utils.MOVE, SrcPath: "d/a", DstPath: "d/b"},
+		{Kind: utils.REMOVE, DstPath: "d/b"},
+	}
+
+	runApiTest(t, &tmpFs, actions, wantedMap)
+}
+
+// test creating a file w/ same old path as renamed file
+func TestTouchMovedFilename(t *testing.T) {
+	wantedMap := make(DirPathToTailChainMap)
+	wantedMap["d"] = make(TailPathToChainMap)
+	wantedMap["d"]["b"] = Chains{
+		Chain{
+			{
+				Path: "a",
+				Type: "create",
+				Size: 0,
+			},
+			{
+				Path: "a",
+				Type: "rename",
+			},
+			{
+				Path: "b",
+				Type: "create",
+				Size: 0,
+			},
+			{
+				Path: "b",
+				Type: "remove",
+			},
 		},
-		{
-			Path: "a",
-			Type: "remove",
+	}
+	wantedMap["d"]["a"] = Chains{
+		Chain{
+			{
+				Path: "a",
+				Type: "create",
+				Size: 0,
+			},
+			{
+				Path: "a",
+				Type: "remove",
+			},
 		},
 	}
 
@@ -198,48 +211,54 @@ func TestTouchMovedFilename(t *testing.T) {
 
 // test moving files between subdirs
 func TestFilesMovedBetweenSubdirs(t *testing.T) {
-	wantedMap := make(map[string]map[string][]syncd.Event)
-	wantedMap["d"] = make(map[string][]syncd.Event)
-	wantedMap["d"]["s1"] = []syncd.Event{
-		{
-			Path: "s1",
-			Type: "create",
-			Size: DIR_BLOCK_SIZE,
-		},
-		{
-			Path: "s1",
-			Type: "remove",
-		},
-	}
-	wantedMap["d"]["s2"] = []syncd.Event{
-		{
-			Path: "s2",
-			Type: "create",
-			Size: DIR_BLOCK_SIZE,
-		},
-		{
-			Path: "s2",
-			Type: "remove",
+	wantedMap := make(DirPathToTailChainMap)
+	wantedMap["d"] = make(TailPathToChainMap)
+	wantedMap["d"]["s1"] = Chains{
+		Chain{
+			{
+				Path: "s1",
+				Type: "create",
+				Size: DIR_BLOCK_SIZE,
+			},
+			{
+				Path: "s1",
+				Type: "remove",
+			},
 		},
 	}
-	wantedMap["d"]["s2/a"] = []syncd.Event{
-		{
-			Path: "s1/a",
-			Type: "create",
-			Size: 0,
+	wantedMap["d"]["s2"] = Chains{
+		Chain{
+			{
+				Path: "s2",
+				Type: "create",
+				Size: DIR_BLOCK_SIZE,
+			},
+			{
+				Path: "s2",
+				Type: "remove",
+			},
 		},
-		{
-			Path: "s1/a",
-			Type: "rename",
-		},
-		{
-			Path: "s2/a",
-			Type: "create",
-			Size: 0,
-		},
-		{
-			Path: "s2/a",
-			Type: "remove",
+	}
+	wantedMap["d"]["s2/a"] = Chains{
+		Chain{
+			{
+				Path: "s1/a",
+				Type: "create",
+				Size: 0,
+			},
+			{
+				Path: "s1/a",
+				Type: "rename",
+			},
+			{
+				Path: "s2/a",
+				Type: "create",
+				Size: 0,
+			},
+			{
+				Path: "s2/a",
+				Type: "remove",
+			},
 		},
 	}
 
@@ -265,48 +284,54 @@ func TestFilesMovedBetweenSubdirs(t *testing.T) {
 
 // test moving/renaming a subdir w/ files
 func TestEmptyDirsMovedBetweenSubdirs(t *testing.T) {
-	wantedMap := make(map[string]map[string][]syncd.Event)
-	wantedMap["d"] = make(map[string][]syncd.Event)
-	wantedMap["d"]["s1"] = []syncd.Event{
-		{
-			Path: "s1",
-			Type: "create",
-			Size: DIR_BLOCK_SIZE,
-		},
-		{
-			Path: "s1",
-			Type: "remove",
-		},
-	}
-	wantedMap["d"]["s2"] = []syncd.Event{
-		{
-			Path: "s2",
-			Type: "create",
-			Size: DIR_BLOCK_SIZE,
-		},
-		{
-			Path: "s2",
-			Type: "remove",
+	wantedMap := make(DirPathToTailChainMap)
+	wantedMap["d"] = make(TailPathToChainMap)
+	wantedMap["d"]["s1"] = Chains{
+		Chain{
+			{
+				Path: "s1",
+				Type: "create",
+				Size: DIR_BLOCK_SIZE,
+			},
+			{
+				Path: "s1",
+				Type: "remove",
+			},
 		},
 	}
-	wantedMap["d"]["s2/s3"] = []syncd.Event{
-		{
-			Path: "s1/s3",
-			Type: "create",
-			Size: DIR_BLOCK_SIZE,
+	wantedMap["d"]["s2"] = Chains{
+		Chain{
+			{
+				Path: "s2",
+				Type: "create",
+				Size: DIR_BLOCK_SIZE,
+			},
+			{
+				Path: "s2",
+				Type: "remove",
+			},
 		},
-		{
-			Path: "s1/s3",
-			Type: "rename",
-		},
-		{
-			Path: "s2/s3",
-			Type: "create",
-			Size: DIR_BLOCK_SIZE,
-		},
-		{
-			Path: "s2/s3",
-			Type: "remove",
+	}
+	wantedMap["d"]["s2/s3"] = Chains{
+		Chain{
+			{
+				Path: "s1/s3",
+				Type: "create",
+				Size: DIR_BLOCK_SIZE,
+			},
+			{
+				Path: "s1/s3",
+				Type: "rename",
+			},
+			{
+				Path: "s2/s3",
+				Type: "create",
+				Size: DIR_BLOCK_SIZE,
+			},
+			{
+				Path: "s2/s3",
+				Type: "remove",
+			},
 		},
 	}
 
@@ -332,48 +357,66 @@ func TestEmptyDirsMovedBetweenSubdirs(t *testing.T) {
 
 // test moving/renaming a subdir w/ files
 func TestNonEmptyDirsMovedBetweenSubdirs(t *testing.T) {
-	wantedMap := make(map[string]map[string][]syncd.Event)
-	wantedMap["d"] = make(map[string][]syncd.Event)
-	wantedMap["d"]["s1"] = []syncd.Event{
-		{
-			Path: "s1",
-			Type: "create",
-			Size: DIR_BLOCK_SIZE,
-		},
-		{
-			Path: "s1",
-			Type: "remove",
-		},
-	}
-	wantedMap["d"]["s2"] = []syncd.Event{
-		{
-			Path: "s2",
-			Type: "create",
-			Size: DIR_BLOCK_SIZE,
-		},
-		{
-			Path: "s2",
-			Type: "remove",
+	wantedMap := make(DirPathToTailChainMap)
+	wantedMap["d"] = make(TailPathToChainMap)
+	wantedMap["d"]["s1"] = Chains{
+		Chain{
+			{
+				Path: "s1",
+				Type: "create",
+				Size: DIR_BLOCK_SIZE,
+			},
+			{
+				Path: "s1",
+				Type: "remove",
+			},
 		},
 	}
-	wantedMap["d"]["s2/s3"] = []syncd.Event{
-		{
-			Path: "s1/s3",
-			Type: "create",
-			Size: DIR_BLOCK_SIZE,
+	wantedMap["d"]["s2"] = Chains{
+		Chain{
+			{
+				Path: "s2",
+				Type: "create",
+				Size: DIR_BLOCK_SIZE,
+			},
+			{
+				Path: "s2",
+				Type: "remove",
+			},
 		},
-		{
-			Path: "s1/s3",
-			Type: "rename",
+	}
+	wantedMap["d"]["s2/s3"] = Chains{
+		Chain{
+			{
+				Path: "s1/s3",
+				Type: "create",
+				Size: DIR_BLOCK_SIZE,
+			},
+			{
+				Path: "s1/s3",
+				Type: "rename",
+			},
+			{
+				Path: "s2/s3",
+				Type: "create",
+				Size: DIR_BLOCK_SIZE,
+			},
+			{
+				Path: "s2/s3",
+				Type: "remove",
+			},
 		},
-		{
-			Path: "s2/s3",
-			Type: "create",
-			Size: DIR_BLOCK_SIZE,
-		},
-		{
-			Path: "s2/s3",
-			Type: "remove",
+	}
+	wantedMap["d"]["s2/s3/a"] = Chains{
+		Chain{
+			{
+				Path: "s1/s3/a",
+				Type: "create",
+			},
+			{
+				Path: "s2/s3/a",
+				Type: "remove",
+			},
 		},
 	}
 
@@ -388,7 +431,9 @@ func TestNonEmptyDirsMovedBetweenSubdirs(t *testing.T) {
 		{Kind: utils.MKDIR, DstPath: "d/s1"},
 		{Kind: utils.MKDIR, DstPath: "d/s2"},
 		{Kind: utils.MKDIR, DstPath: "d/s1/s3"},
+		{Kind: utils.TOUCH, DstPath: "d/s1/s3/a"},
 		{Kind: utils.MOVE, SrcPath: "d/s1/s3", DstPath: "d/s2/s3"},
+		{Kind: utils.REMOVE, DstPath: "d/s2/s3/a"},
 		{Kind: utils.RMDIR, DstPath: "d/s2/s3"},
 		{Kind: utils.RMDIR, DstPath: "d/s1"},
 		{Kind: utils.RMDIR, DstPath: "d/s2"},
@@ -399,79 +444,89 @@ func TestNonEmptyDirsMovedBetweenSubdirs(t *testing.T) {
 
 // test moving/renaming a subdir w/ files
 func TestMoveNonEmptySubdirThenMoveFileOut(t *testing.T) {
-	wantedMap := make(map[string]map[string][]syncd.Event)
-	wantedMap["d"] = make(map[string][]syncd.Event)
-	wantedMap["d"]["s1"] = []syncd.Event{
-		{
-			Path: "s1",
-			Type: "create",
-			Size: DIR_BLOCK_SIZE,
-		},
-		{
-			Path: "s1",
-			Type: "remove",
-		},
-	}
-	wantedMap["d"]["s2"] = []syncd.Event{
-		{
-			Path: "s2",
-			Type: "create",
-			Size: DIR_BLOCK_SIZE,
-		},
-		{
-			Path: "s2",
-			Type: "remove",
+	wantedMap := make(DirPathToTailChainMap)
+	wantedMap["d"] = make(TailPathToChainMap)
+	wantedMap["d"]["s1"] = Chains{
+		Chain{
+			{
+				Path: "s1",
+				Type: "create",
+				Size: DIR_BLOCK_SIZE,
+			},
+			{
+				Path: "s1",
+				Type: "remove",
+			},
 		},
 	}
-	wantedMap["d"]["s2/s4"] = []syncd.Event{
-		{
-			Path: "s2/s4",
-			Type: "create",
-			Size: DIR_BLOCK_SIZE,
-		},
-		{
-			Path: "s2/s4",
-			Type: "remove",
-		},
-	}
-	wantedMap["d"]["s2/s4/s3"] = []syncd.Event{
-		{
-			Path: "s1/s3",
-			Type: "create",
-			Size: DIR_BLOCK_SIZE,
-		},
-		{
-			Path: "s1/s3",
-			Type: "rename",
-		},
-		{
-			Path: "s2/s4/s3",
-			Type: "create",
-			Size: DIR_BLOCK_SIZE,
-		},
-		{
-			Path: "s2/s4/s3",
-			Type: "remove",
+	wantedMap["d"]["s2"] = Chains{
+		Chain{
+			{
+				Path: "s2",
+				Type: "create",
+				Size: DIR_BLOCK_SIZE,
+			},
+			{
+				Path: "s2",
+				Type: "remove",
+			},
 		},
 	}
-	wantedMap["d"]["s1/a"] = []syncd.Event{
-		{
-			Path: "s1/s3/a",
-			Type: "create",
-			Size: 0,
+	wantedMap["d"]["s2/s4"] = Chains{
+		Chain{
+			{
+				Path: "s2/s4",
+				Type: "create",
+				Size: DIR_BLOCK_SIZE,
+			},
+			{
+				Path: "s2/s4",
+				Type: "remove",
+			},
 		},
-		{
-			Path: "s2/s4/s3/a",
-			Type: "rename",
+	}
+	wantedMap["d"]["s2/s4/s3"] = Chains{
+		Chain{
+			{
+				Path: "s1/s3",
+				Type: "create",
+				Size: DIR_BLOCK_SIZE,
+			},
+			{
+				Path: "s1/s3",
+				Type: "rename",
+			},
+			{
+				Path: "s2/s4/s3",
+				Type: "create",
+				Size: DIR_BLOCK_SIZE,
+			},
+			{
+				Path: "s2/s4/s3",
+				Type: "remove",
+			},
 		},
-		{
-			Path: "s1/a",
-			Type: "create",
-			Size: 0,
-		},
-		{
-			Path: "s1/a",
-			Type: "remove",
+	}
+	wantedMap["d"]["s1/a"] = Chains{
+		Chain{
+			{
+				Path: "s1/s3/a",
+				Type: "create",
+				Size: 0,
+			},
+			{
+				Path: "s2/s4/s3/a",
+				Type: "rename",
+			},
+			{
+				Path: "s1/a",
+				Type: "create",
+				Size: 0,
+			},
+			{
+				Path: "s1/a",
+				Type: "remove",
+			},
 		},
 	}
 
@@ -500,7 +555,171 @@ func TestMoveNonEmptySubdirThenMoveFileOut(t *testing.T) {
 	runApiTest(t, &tmpFs, actions, wantedMap)
 }
 
-func runApiTest(t *testing.T, tmpFs *utils.TmpFs, actions []utils.FsAction, wantedMap map[string]map[string][]syncd.Event) {
+// test reusing a removed filename
+func TestInodeReuseByTouch(t *testing.T) {
+	wantedMap := make(DirPathToTailChainMap)
+	wantedMap["d"] = make(TailPathToChainMap)
+	wantedMap["d"]["a"] = Chains{
+		Chain{
+			{
+				Path: "a",
+				Type: "create",
+				Size: 0,
+			},
+			{
+				Path: "a",
+				Type: "remove",
+			},
+		},
+		Chain{
+			{
+				Path: "a",
+				Type: "create",
+				Size: 0,
+			},
+			{
+				Path: "a",
+				Type: "remove",
+			},
+		},
+	}
+
+	tmpDir := utils.TmpDir{
+		Name: "d",
+		Dirs: make([]*utils.TmpDir, 0),
+	}
+
+	tmpFs := utils.TmpFs{Path: "../.data/tmp/", Dirs: []*utils.TmpDir{&tmpDir}}
+
+	actions := []utils.FsAction{
+		{Kind: utils.TOUCH, DstPath: "d/a"},
+		{Kind: utils.REMOVE, DstPath: "d/a"},
+		{Kind: utils.TOUCH, DstPath: "d/a"},
+		{Kind: utils.REMOVE, DstPath: "d/a"},
+	}
+
+	runApiTest(t, &tmpFs, actions, wantedMap)
+}
+
+// test reusing a removed filename by existing file
+func TestFileReuseByMove(t *testing.T) {
+	wantedMap := make(DirPathToTailChainMap)
+	wantedMap["d"] = make(TailPathToChainMap)
+	wantedMap["d"]["a"] = Chains{
+		Chain{
+			{
+				Path: "a",
+				Type: "create",
+				Size: 0,
+			},
+		},
+		Chain{
+			{
+				Path: "b",
+				Type: "create",
+				Size: 0,
+			},
+			{
+				Path: "b",
+				Type: "rename",
+			},
+			{
+				Path: "a",
+				Type: "create",
+				Size: 0,
+			},
+			{
+				Path: "a",
+				Type: "remove",
+			},
+		},
+	}
+
+	tmpDir := utils.TmpDir{
+		Name: "d",
+		Dirs: make([]*utils.TmpDir, 0),
+	}
+
+	tmpFs := utils.TmpFs{Path: "../.data/tmp/", Dirs: []*utils.TmpDir{&tmpDir}}
+
+	actions := []utils.FsAction{
+		{Kind: utils.TOUCH, DstPath: "d/a"},
+		{Kind: utils.TOUCH, DstPath: "d/b"},
+		{Kind: utils.MOVE, SrcPath: "d/b", DstPath: "d/a"},
+		{Kind: utils.REMOVE, DstPath: "d/a"},
+	}
+
+	runApiTest(t, &tmpFs, actions, wantedMap)
+}
+
+// test file copied then removed
+func TestFileCopiedThenRemoved(t *testing.T) {
+	content := []byte("I am Weasel!")
+	hash, err := files.GetHash(bytes.NewBuffer(content))
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	wantedMap := make(DirPathToTailChainMap)
+	wantedMap["d"] = make(TailPathToChainMap)
+	wantedMap["d"]["a"] = Chains{
+		Chain{
+			{
+				Path: "a",
+				Type: "create",
+				Size: 0,
+			},
+			{
+				Path: "a",
+				Type: "write",
+				Size: uint64(len(content)),
+				Hash: &hash,
+			},
+			{
+				Path: "a",
+				Type: "remove",
+			},
+		},
+	}
+	wantedMap["d"]["b"] = Chains{
+		Chain{
+			{
+				Path: "b",
+				Type: "create",
+				Size: 0,
+			},
+			{
+				Path: "b",
+				Type: "write",
+				Size: uint64(len(content)),
+				Hash: &hash,
+			},
+			{
+				Path: "b",
+				Type: "remove",
+			},
+		},
+	}
+
+	tmpDir := utils.TmpDir{
+		Name: "d",
+		Dirs: make([]*utils.TmpDir, 0),
+	}
+
+	tmpFs := utils.TmpFs{Path: "../.data/tmp/", Dirs: []*utils.TmpDir{&tmpDir}}
+
+	actions := []utils.FsAction{
+		{Kind: utils.TOUCH, DstPath: "d/a"},
+		{Kind: utils.WRITE, DstPath: "d/a", Content: content},
+		{Kind: utils.COPY, DstPath: "d/b", SrcPath: "d/a"},
+		{Kind: utils.REMOVE, DstPath: "d/a"},
+		{Kind: utils.REMOVE, DstPath: "d/b"},
+	}
+
+	runApiTest(t, &tmpFs, actions, wantedMap)
+}
+
+func runApiTest(t *testing.T, tmpFs *utils.TmpFs, actions []utils.FsAction, wantedMap DirPathToTailChainMap) {
 	wrapper := initApiTest(t, tmpFs)
 	watcher := wrapper.watcher
 	store := wrapper.store
@@ -516,38 +735,8 @@ func runApiTest(t *testing.T, tmpFs *utils.TmpFs, actions []utils.FsAction, want
 	}
 
 	takeActions(t, actions, watcher.ProcessedChanRx)
-
-	for dirPath, wantedChainMap := range wantedMap {
-		dir, ok := store.GetDirByPath(dirPath)
-		if !ok {
-			t.Fatalf("Can't get dir: %q", dirPath)
-		}
-
-		gotChains, ok := store.GetChainsInDir(dir.ID)
-		if !ok {
-			t.Fatalf("Can't get chains for dir: %q", dirPath)
-		}
-
-		for lkpPath, wanted := range wantedChainMap {
-			chain, ok := store.GetChainByPath(dir.ID, lkpPath)
-			if !ok {
-				t.Fatal("Can't get chain")
-			}
-
-			got, ok := store.GetEventsInChain(chain.ID)
-			if !ok {
-				t.Fatal("Can't get events")
-			}
-
-			if err := eventSlicesMatch(wanted, got); err != nil {
-				logger.Error(fmt.Sprintf("events mismatch testing %s/%s", dirPath, lkpPath))
-				t.Fatal(err)
-			}
-		}
-
-		if len(gotChains) != len(wantedChainMap) {
-			t.Fatalf("Got chains we didn't want:\n\tgot: %+v\n\twanted: %+v", gotChains, wantedChainMap)
-		}
+	if err := compareWanted(t, wantedMap, store); err != nil {
+		t.Fatal(err)
 	}
 }
 
@@ -558,7 +747,7 @@ func initApiTest(t *testing.T, tmpFs *utils.TmpFs) ApiTestWrapper {
 	}
 
 	store := syncd.NewMemStore()
-	managedDir := syncd.ManagedDirectory{Path: "d"}
+	managedDir := syncd.ManagedDirectory{Path: tmpFs.Dirs[0].Name}
 
 	if err := setupStoreFromLocalState(tmpFs, []syncd.ManagedDirectory{managedDir}, store); err != nil {
 		tmpFs.Destroy()
@@ -637,13 +826,102 @@ func takeActions(t *testing.T, actions []utils.FsAction, rx <-chan syncd.FileEve
 		}
 		if nRx != n {
 			// for debug
-			// logger.Warn(fmt.Sprintf("received unexpected number of events %d/%d", nRx, n))
-			// for {
-			// 	time.Sleep(1 * time.Minute)
-			// }
+			logger.Warn(fmt.Sprintf("received unexpected number of events %d/%d", nRx, n))
+			for {
+				time.Sleep(1 * time.Minute)
+			}
 			t.Fatal(fmt.Sprintf("received unexpected number of events %d/%d", nRx, n))
 		}
 	}
+}
+
+func compareWanted(t *testing.T, wantedMap DirPathToTailChainMap, store syncd.EventStore) error {
+	// grab chains from store and massage into our test type
+	gotMap := make(DirPathToTailChainMap)
+	gotDirs := make([]string, 0)
+	gotTailsMap := make(map[string][]string)
+
+	for _, d := range store.GetDirs() {
+		dirChainMap := make(TailPathToChainMap)
+		gotMap[d.Path] = dirChainMap
+		gotDirs = append(gotDirs, d.Path)
+		gotTailsMap[d.Path] = make([]string, 0)
+		chains, ok := store.GetChainsInDir(d.ID)
+		if !ok {
+			return errors.New(fmt.Sprintf("Failed to get chains in dir: %s", d))
+		}
+		for _, chain := range chains {
+			events, ok := store.GetEventsInChain(chain.ID)
+			if !ok {
+				return errors.New(fmt.Sprintf("Failed to get events in chain: %s", chain))
+			}
+			tailPath := events[len(events)-1].Path
+			if indexOf(gotTailsMap[d.Path], tailPath) < 0 {
+				gotTailsMap[d.Path] = append(gotTailsMap[d.Path], tailPath)
+			}
+			if _, ok := dirChainMap[tailPath]; !ok {
+				dirChainMap[tailPath] = make(Chains, 0)
+			}
+			dirChainMap[tailPath] = append(dirChainMap[tailPath], events)
+		}
+	}
+
+	// summarize wanted for top-level checks
+	wantedDirs := make([]string, 0, len(wantedMap))
+	wantedTailsMap := make(map[string][]string)
+	for dirPath, chainMap := range wantedMap {
+		wantedDirs = append(wantedDirs, dirPath)
+		wantedTailsMap[dirPath] = make([]string, 0)
+		for path := range chainMap {
+			wantedTailsMap[dirPath] = append(wantedTailsMap[dirPath], path)
+		}
+	}
+
+	// first check that the dirs wanted match the dirs got
+	if !assert.ElementsMatchf(t, wantedDirs, gotDirs, "Dirs differ b/w wanted and got") {
+		t.FailNow()
+	}
+
+	// then check that in each dir we got the tail files we expected
+	for dirPath, wantedPaths := range wantedTailsMap {
+		if !assert.ElementsMatchf(t, wantedPaths, gotTailsMap[dirPath], "Expected chain tail paths differ for %q", dirPath) {
+			t.FailNow()
+		}
+	}
+
+	// then test for realz
+	for d, gotChainMap := range gotMap {
+		wantedChainMap := wantedMap[d]
+		for p, gotChains := range gotChainMap {
+			wantedChains := wantedChainMap[p]
+			if len(gotChains) != len(wantedChains) {
+				return errors.New(fmt.Sprintf("Number of chains got differs from wanted: %d got / %d wanted", len(gotChains), len(wantedChains)))
+			}
+			if len(gotChains) == 1 {
+				if err := eventSlicesMatch(wantedChains[0], gotChains[0]); err != nil {
+					return err
+				}
+				continue
+			}
+			match := false
+			for _, wantedChain := range wantedChains {
+				var j int
+				var gotChain Chain
+				for j, gotChain = range gotChains {
+					if err := eventSlicesMatch(wantedChain, gotChain); err == nil {
+						match = true
+						break
+					}
+				}
+				if !match {
+					return errors.New(fmt.Sprintf("No matching chains for:\n\twanted: %v\n\tgot: %v", wantedChain, gotChains))
+				}
+				gotChains = append(gotChains[:j], gotChains[j+1:]...)
+			}
+		}
+	}
+
+	return nil
 }
 
 // this function compares wanted events against got events
@@ -670,17 +948,31 @@ func eventSlicesMatch(wanted []syncd.Event, got []syncd.Event) error {
 }
 
 func eqEvents(wanted syncd.Event, got syncd.Event) bool {
+	// always compare types
 	if wanted.Type != got.Type {
 		return false
 	}
+	// always compare paths
 	if wanted.Path != got.Path {
 		return false
 	}
-	if wanted.Size != got.Size {
-		return false
-	}
-	if wanted.Hash != nil && got.Hash != nil && *wanted.Hash != *got.Hash {
-		return false
+	// we don't always care about looking at node attributes, only compare if wanted has a hash
+	if wanted.Hash != nil && got.Hash != nil {
+		if wanted.Size != got.Size {
+			return false
+		}
+		if *wanted.Hash != *got.Hash {
+			return false
+		}
 	}
 	return true
+}
+
+func indexOf[T comparable](slice []T, value T) int {
+	for i, v := range slice {
+		if v == value {
+			return i
+		}
+	}
+	return -1
 }

@@ -245,8 +245,8 @@ func handleEvent(dirEvent *DirEvent, store EventStore) error {
 		return errors.New(fmt.Sprintf("Failed to find lookup Chain for event:  %v", fileEvent))
 	}
 	// ignore invalid events for now
-	if !isValidEvent(dirEvent) {
-		return errors.ErrUnsupported
+	if err := isValidEvent(dirEvent); err != nil {
+		return err
 	}
 	// add new chain for new nodes
 	if fileEvent.Type == "create" && dirEvent.chain == nil {
@@ -343,33 +343,39 @@ func lkpChain(dirEvent *DirEvent, store EventStore) error {
 }
 
 // isValidEvent ensures dirEvent is properly initialized for processing
-func isValidEvent(dirEvent *DirEvent) bool {
+func isValidEvent(dirEvent *DirEvent) error {
 	node := dirEvent.node
 	chain := dirEvent.chain
 	switch dirEvent.fileEvent.Type {
 	case "create":
-		if node == nil || node.Type() < 1 {
-			return false
+		if node == nil {
+			return errors.New("create w/ no node")
+		}
+		if node.Type() < 1 {
+			return errors.New(fmt.Sprintf("create unsupported node: %v", node))
 		}
 	case "write":
-		if node == nil || node.Type() < 1 {
-			return false
+		if node == nil {
+			return errors.New("write w/ no node")
+		}
+		if node.Type() < 1 {
+			return errors.New(fmt.Sprintf("write unsupported node: %v", node))
 		}
 		if chain == nil {
-			return false
+			return errors.New(fmt.Sprintf("write w/ no chain"))
 		}
 	case "rename":
 		if chain == nil {
-			return false
+			return errors.New(fmt.Sprintf("rename w/ no chain"))
 		}
 	case "remove":
 		if chain == nil {
-			return false
+			return errors.New(fmt.Sprintf("remove w/ no chain"))
 		}
 	default:
-		return false
+		return errors.New(fmt.Sprintf("Unsupported event operation: %v", dirEvent.fileEvent.Type))
 	}
-	return true
+	return nil
 }
 
 func setEventState(event *Event, node *files.Node) {

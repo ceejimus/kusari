@@ -43,10 +43,9 @@ type EventStore interface {
 	GetChainByPath(dirID uuid.UUID, path string) (*Chain, bool) // get chain whose tail is event w/ path
 	GetChainByIno(ino uint64) (*Chain, bool)                    // get chain by ino
 	GetEventByUUID(id uuid.UUID) (*Event, bool)                 // get event by UUID
-	GetChainsInDir(id uuid.UUID) ([]Chain, bool)
-	GetEventsInChain(id uuid.UUID) ([]Event, bool)
-	// SetChainTail(id uuid.UUID, eventID uuid.UUID) error          // set new tail event for chain
-	// SetEventNext(id uuid.UUID, eventID uuid.UUID) error          // set new tail event for chain
+	GetDirs() []Dir                                             // get all stored dirs
+	GetChainsInDir(id uuid.UUID) ([]Chain, bool)                // get all chains in directory w/ ID
+	GetEventsInChain(id uuid.UUID) ([]Event, bool)              // get all events in chain w/ ID
 }
 
 func (d Dir) String() string {
@@ -58,15 +57,14 @@ func (c Chain) String() string {
 }
 
 func (e Event) String() string {
-	hash := "<nil>"
+	hash := ""
 	if e.Hash != nil {
 		hash = *e.Hash
 	}
-	return fmt.Sprintf("Event: (%s) %s - %s %q |%s|",
+	return fmt.Sprintf("(<%s> %s %d:|%s|)",
 		e.Type,
-		e.Timestamp.Format(time.RFC1123),
-		e.ID,
 		e.Path,
+		e.Size,
 		hash,
 	)
 }

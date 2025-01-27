@@ -118,18 +118,18 @@ func (lkp chainPathLkp) move(dstPath string, srcPath string) error {
 	return nil
 }
 
-func (lkp chainPathLkp) delete(path string) error {
+func (lkp chainPathLkp) delete(path string) {
 	// get parent dir path and node name
 	dir, name := filepath.Split(path)
 	// lookup chain map for dir
 	chMap, ok := lkp.getChainMap(dir)
 	if !ok {
-		return errors.New(fmt.Sprintf("No chain map for: %q", dir))
+		return
 	}
 	// delete chain record from map
 	delete(chMap, name)
 	// return
-	return nil
+	return
 }
 
 func (lkp chainPathLkp) getChainMap(path string) (chainMap, bool) {
@@ -262,6 +262,16 @@ func (s *MemStore) GetEventsInChain(id uuid.UUID) ([]Event, bool) {
 	return events, true
 }
 
+func (s *MemStore) GetDirs() []Dir {
+	dirs := make([]Dir, len(s.dirIDMap))
+	i := 0
+	for _, memDir := range s.dirIDMap {
+		dirs[i] = *toDir(memDir)
+		i++
+	}
+	return dirs
+}
+
 func (s *MemStore) GetChainsInDir(id uuid.UUID) ([]Chain, bool) {
 	memDir, ok := getDirByUUID(s, id)
 	if !ok {
@@ -365,30 +375,32 @@ func addEvent(s *MemStore, event Event, chainID uuid.UUID) (*Event, error) {
 		memChain.Tail.Next = memEvent
 	}
 
-	err = setChainTail(memChain, memEvent)
+	err = updateChainLkps(s, memChain, memEvent)
 	if err != nil {
 		return nil, err
 	}
 
+	memChain.Tail = memEvent
+
 	return &event, nil
 }
 
-func setChainTail(memChain *MemChain, memEvent *MemEvent) error {
+func updateChainLkps(s *MemStore, memChain *MemChain, memEvent *MemEvent) error {
 	// sprinkle some fairy dust for path lookups after renames
 	if memEvent.Type == "create" && memChain.Tail != nil && memChain.Tail.Type == "rename" {
 		if err := memChain.Dir.ChainLkp.move(memEvent.Path, memChain.Tail.Path); err != nil {
 			return err
 		}
+	} else if memEvent.Type == "remove" {
+		delete(s.chainInoMap, memChain.Ino)
+		memChain.Dir.ChainLkp.delete(memEvent.Path)
 	} else {
-		_, ok := memChain.Dir.ChainLkp.get(memEvent.Path)
-		if !ok {
+		if _, ok := memChain.Dir.ChainLkp.get(memEvent.Path); !ok {
 			if err := memChain.Dir.ChainLkp.add(memEvent.Path, memChain); err != nil {
 				return err
 			}
 		}
 	}
-
-	memChain.Tail = memEvent
 
 	return nil
 }
