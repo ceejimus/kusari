@@ -7,7 +7,7 @@ import (
 	"path/filepath"
 	"strings"
 
-	files "atmoscape.net/fileserver/fs"
+	"atmoscape.net/fileserver/fnode"
 	"atmoscape.net/fileserver/logger"
 	"github.com/gobwas/glob"
 )
@@ -18,10 +18,10 @@ type ManagedDirectory struct {
 	Exclude []string `yaml:"excl"`
 }
 
-type ManagedMap map[string][]files.Node
+type ManagedMap map[string][]fnode.Node
 
 func GetManagedMap(topDir string, managedDirs []ManagedDirectory) (ManagedMap, error) {
-	managedMap := make(map[string][]files.Node)
+	managedMap := make(map[string][]fnode.Node)
 
 	for _, managedDir := range managedDirs {
 		managedFiles, err := GetManagedNodes(topDir, managedDir)
@@ -35,8 +35,8 @@ func GetManagedMap(topDir string, managedDirs []ManagedDirectory) (ManagedMap, e
 	return managedMap, nil
 }
 
-func GetManagedNodes(toDir string, managedDir ManagedDirectory) ([]files.Node, error) {
-	managedFiles := make([]files.Node, 0)
+func GetManagedNodes(toDir string, managedDir ManagedDirectory) ([]fnode.Node, error) {
+	managedFiles := make([]fnode.Node, 0)
 
 	inclGlobs := mapToGlobs(managedDir.Include)
 	exclGlobs := mapToGlobs(managedDir.Exclude)
@@ -54,13 +54,13 @@ func GetManagedNodes(toDir string, managedDir ManagedDirectory) ([]files.Node, e
 			return nil
 		}
 
-		relPath := files.GetRelativePath(path, fullDirPath)
+		relPath := fnode.GetRelativePath(path, fullDirPath)
 		// add trailing slash to directories so we can match on our directory globs
 		if d.Type().IsDir() && !strings.HasSuffix(relPath, "/") {
 			relPath = fmt.Sprintf("%s/", relPath)
 		}
 
-		// for now we only check globs on files
+		// for now we only check globs on fnode
 		if checkGlobs(exclGlobs, relPath, false) {
 			logger.Trace(fmt.Sprintf("Excluded - %v : %v", relPath, d))
 			return nil
@@ -71,7 +71,7 @@ func GetManagedNodes(toDir string, managedDir ManagedDirectory) ([]files.Node, e
 			return nil
 		}
 
-		// we're only going to look at regular files and regular dirs
+		// we're only going to look at regular fnode and regular dirs
 		// TODO: implement our own directory recursion?
 		if !d.Type().IsRegular() && !d.Type().IsDir() {
 			logger.Trace(fmt.Sprintf("SKIPPING - %v : %v", relPath, d))
@@ -81,7 +81,7 @@ func GetManagedNodes(toDir string, managedDir ManagedDirectory) ([]files.Node, e
 		logger.Trace(fmt.Sprintf("Adding - %v : %v", relPath, d))
 
 		logger.Trace(fmt.Sprintf("%q", relPath))
-		node, err := files.NewNode(path)
+		node, err := fnode.NewNode(path)
 		if err != nil {
 			return err
 		}

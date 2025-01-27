@@ -4,7 +4,7 @@ import (
 	"path/filepath"
 	"testing"
 
-	files "atmoscape.net/fileserver/fs"
+	"atmoscape.net/fileserver/fnode"
 	"atmoscape.net/fileserver/utils"
 	"github.com/stretchr/testify/assert"
 )
@@ -27,7 +27,7 @@ func helperTestGetManagedFiles(t *testing.T, tmpDir utils.TmpDir, include []stri
 	got := make([]string, len(managedFiles))
 
 	for i, managedFile := range managedFiles {
-		got[i] = files.GetRelativePath(managedFile.Path, filepath.Join(tmpFs.Path, managedDir.Path))
+		got[i] = fnode.GetRelativePath(managedFile.Path, filepath.Join(tmpFs.Path, managedDir.Path))
 	}
 
 	assert.ElementsMatch(t, wanted, got)

@@ -6,7 +6,7 @@ import (
 	"path/filepath"
 	"time"
 
-	files "atmoscape.net/fileserver/fs"
+	"atmoscape.net/fileserver/fnode"
 	"atmoscape.net/fileserver/syncd"
 	"atmoscape.net/fileserver/utils"
 )
@@ -54,7 +54,7 @@ func setupStoreFromLocalState(tmpFs *utils.TmpFs, managedDirs []syncd.ManagedDir
 			state := node.State()
 			event := &syncd.Event{
 				Timestamp: time.Now(),
-				Path:      files.GetRelativePath(node.Path, dirPath),
+				Path:      fnode.GetRelativePath(node.Path, dirPath),
 				Type:      "create",
 				Size:      state.Size,
 				Hash:      state.Hash,

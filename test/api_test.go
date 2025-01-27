@@ -9,7 +9,7 @@ import (
 	"testing"
 	"time"
 
-	files "atmoscape.net/fileserver/fs"
+	"atmoscape.net/fileserver/fnode"
 	"atmoscape.net/fileserver/logger"
 	"atmoscape.net/fileserver/syncd"
 	"atmoscape.net/fileserver/utils"
@@ -55,7 +55,7 @@ func setup() {
 // test a remove for a single file
 func TestFileRemove(t *testing.T) {
 	content := []byte("i am a")
-	hash, err := files.GetHash(bytes.NewBuffer(content))
+	hash, err := fnode.GetHash(bytes.NewBuffer(content))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -97,7 +97,7 @@ func TestFileRemove(t *testing.T) {
 // test a create, write, rename, remove flow for single file
 func TestSingleFileCWRR(t *testing.T) {
 	content := []byte("I am Weasel!")
-	hash, err := files.GetHash(bytes.NewBuffer(content))
+	hash, err := fnode.GetHash(bytes.NewBuffer(content))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -655,7 +655,7 @@ func TestFileReuseByMove(t *testing.T) {
 // test file copied then removed
 func TestFileCopiedThenRemoved(t *testing.T) {
 	content := []byte("I am Weasel!")
-	hash, err := files.GetHash(bytes.NewBuffer(content))
+	hash, err := fnode.GetHash(bytes.NewBuffer(content))
 	if err != nil {
 		t.Fatal(err)
 	}
