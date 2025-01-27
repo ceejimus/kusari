@@ -4,6 +4,7 @@ import (
 	"errors"
 	"fmt"
 	"path/filepath"
+	"sync"
 	"time"
 
 	"github.com/google/uuid"
@@ -49,6 +50,7 @@ type MemEvent struct {
 }
 
 type MemStore struct {
+	mu          sync.Mutex
 	dirIDMap    dirIDMap
 	dirPathMap  dirPathMap
 	chainIDMap  chainIDMap
@@ -181,18 +183,26 @@ func NewMemStore() *MemStore {
 }
 
 func (s *MemStore) AddDir(dir Dir) (*Dir, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
 	return addDir(s, dir)
 }
 
 func (s *MemStore) AddChain(chain Chain, dirID uuid.UUID) (*Chain, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
 	return addChain(s, chain, dirID)
 }
 
 func (s *MemStore) AddEvent(event Event, chainID uuid.UUID) (*Event, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
 	return addEvent(s, event, chainID)
 }
 
 func (s *MemStore) GetDirByUUID(id uuid.UUID) (*Dir, bool) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
 	memDir, ok := getDirByUUID(s, id)
 	if !ok {
 		return nil, false
@@ -201,6 +211,8 @@ func (s *MemStore) GetDirByUUID(id uuid.UUID) (*Dir, bool) {
 }
 
 func (s *MemStore) GetDirByPath(path string) (*Dir, bool) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
 	memDir, ok := getDirByPath(s, path)
 	if !ok {
 		return nil, false
@@ -209,6 +221,8 @@ func (s *MemStore) GetDirByPath(path string) (*Dir, bool) {
 }
 
 func (s *MemStore) GetChainByUUID(id uuid.UUID) (*Chain, bool) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
 	memChain, ok := getChainByUUID(s, id)
 	if !ok {
 		return nil, false
@@ -217,6 +231,8 @@ func (s *MemStore) GetChainByUUID(id uuid.UUID) (*Chain, bool) {
 }
 
 func (s *MemStore) GetChainByPath(dirID uuid.UUID, path string) (*Chain, bool) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
 	_, ok := getDirByUUID(s, dirID)
 	if !ok {
 		return nil, false
@@ -230,6 +246,8 @@ func (s *MemStore) GetChainByPath(dirID uuid.UUID, path string) (*Chain, bool) {
 }
 
 func (s *MemStore) GetChainByIno(ino uint64) (*Chain, bool) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
 	memChain, ok := getChainByIno(s, ino)
 	if !ok {
 		return nil, false
@@ -238,6 +256,8 @@ func (s *MemStore) GetChainByIno(ino uint64) (*Chain, bool) {
 }
 
 func (s *MemStore) GetEventByUUID(id uuid.UUID) (*Event, bool) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
 	memEvent, ok := getEventByUUID(s, id)
 	if !ok {
 		return nil, false
@@ -246,6 +266,8 @@ func (s *MemStore) GetEventByUUID(id uuid.UUID) (*Event, bool) {
 }
 
 func (s *MemStore) GetEventsInChain(id uuid.UUID) ([]Event, bool) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
 	memChain, ok := getChainByUUID(s, id)
 	if !ok {
 		return []Event{}, false
@@ -263,6 +285,8 @@ func (s *MemStore) GetEventsInChain(id uuid.UUID) ([]Event, bool) {
 }
 
 func (s *MemStore) GetDirs() []Dir {
+	s.mu.Lock()
+	defer s.mu.Unlock()
 	dirs := make([]Dir, len(s.dirIDMap))
 	i := 0
 	for _, memDir := range s.dirIDMap {
@@ -273,6 +297,8 @@ func (s *MemStore) GetDirs() []Dir {
 }
 
 func (s *MemStore) GetChainsInDir(id uuid.UUID) ([]Chain, bool) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
 	memDir, ok := getDirByUUID(s, id)
 	if !ok {
 		return nil, false
