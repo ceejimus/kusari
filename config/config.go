@@ -29,6 +29,11 @@ func LoadConfig(filename string) (*NodeConfig, error) {
 		return nil, err
 	}
 
+	config.TopDir = filepath.Clean(config.TopDir)
+	for i := range config.ManagedDirectories {
+		config.ManagedDirectories[i].Path = filepath.Clean(config.ManagedDirectories[i].Path)
+	}
+
 	return &config, nil
 }
 
