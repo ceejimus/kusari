@@ -38,8 +38,8 @@ type MemChain struct {
 
 type MemEvent struct {
 	ID        uuid.UUID // id
-	Chain     *MemChain
-	Type      string    // "create", "modify", "delete", "rename"
+	Chain     *MemChain // the chain this event is in
+	Type      EventType // "create", "modify", "delete", "rename", etc.
 	Timestamp time.Time // time event processed
 	Path      string    // relative path of file
 	ModTime   time.Time // modification time
@@ -413,11 +413,11 @@ func addEvent(s *MemStore, event Event, chainID uuid.UUID) (*Event, error) {
 
 func updateChainLkps(s *MemStore, memChain *MemChain, memEvent *MemEvent) error {
 	// sprinkle some fairy dust for path lookups after renames
-	if memEvent.Type == "create" && memChain.Tail != nil && memChain.Tail.Type == "rename" {
+	if memEvent.Type == Create && memChain.Tail != nil && memChain.Tail.Type == Rename {
 		if err := memChain.Dir.ChainLkp.move(memEvent.Path, memChain.Tail.Path); err != nil {
 			return err
 		}
-	} else if memEvent.Type == "remove" {
+	} else if memEvent.Type == Remove {
 		delete(s.chainInoMap, memChain.Ino)
 		memChain.Dir.ChainLkp.delete(memEvent.Path)
 	} else {

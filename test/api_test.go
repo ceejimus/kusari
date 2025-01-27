@@ -66,13 +66,13 @@ func TestFileRemove(t *testing.T) {
 		Chain{
 			{
 				Path: "a",
-				Type: "create",
+				Type: syncd.Create,
 				Size: uint64(len(content)),
 				Hash: &hash,
 			},
 			{
 				Path: "a",
-				Type: "remove",
+				Type: syncd.Remove,
 			},
 		},
 	}
@@ -108,28 +108,28 @@ func TestSingleFileCWRR(t *testing.T) {
 		Chain{
 			{
 				Path: "a",
-				Type: "create",
+				Type: syncd.Create,
 				Size: 0,
 			},
 			{
 				Path: "a",
-				Type: "write",
+				Type: syncd.Write,
 				Size: uint64(len(content)),
 				Hash: &hash,
 			},
 			{
 				Path: "a",
-				Type: "rename",
+				Type: syncd.Rename,
 			},
 			{
 				Path: "b",
-				Type: "create",
+				Type: syncd.Create,
 				Size: uint64(len(content)),
 				Hash: &hash,
 			},
 			{
 				Path: "b",
-				Type: "remove",
+				Type: syncd.Remove,
 			},
 		},
 	}
@@ -159,21 +159,21 @@ func TestTouchMovedFilename(t *testing.T) {
 		Chain{
 			{
 				Path: "a",
-				Type: "create",
+				Type: syncd.Create,
 				Size: 0,
 			},
 			{
 				Path: "a",
-				Type: "rename",
+				Type: syncd.Rename,
 			},
 			{
 				Path: "b",
-				Type: "create",
+				Type: syncd.Create,
 				Size: 0,
 			},
 			{
 				Path: "b",
-				Type: "remove",
+				Type: syncd.Remove,
 			},
 		},
 	}
@@ -181,12 +181,12 @@ func TestTouchMovedFilename(t *testing.T) {
 		Chain{
 			{
 				Path: "a",
-				Type: "create",
+				Type: syncd.Create,
 				Size: 0,
 			},
 			{
 				Path: "a",
-				Type: "remove",
+				Type: syncd.Remove,
 			},
 		},
 	}
@@ -217,12 +217,12 @@ func TestFilesMovedBetweenSubdirs(t *testing.T) {
 		Chain{
 			{
 				Path: "s1",
-				Type: "create",
+				Type: syncd.Create,
 				Size: DIR_BLOCK_SIZE,
 			},
 			{
 				Path: "s1",
-				Type: "remove",
+				Type: syncd.Remove,
 			},
 		},
 	}
@@ -230,12 +230,12 @@ func TestFilesMovedBetweenSubdirs(t *testing.T) {
 		Chain{
 			{
 				Path: "s2",
-				Type: "create",
+				Type: syncd.Create,
 				Size: DIR_BLOCK_SIZE,
 			},
 			{
 				Path: "s2",
-				Type: "remove",
+				Type: syncd.Remove,
 			},
 		},
 	}
@@ -243,21 +243,21 @@ func TestFilesMovedBetweenSubdirs(t *testing.T) {
 		Chain{
 			{
 				Path: "s1/a",
-				Type: "create",
+				Type: syncd.Create,
 				Size: 0,
 			},
 			{
 				Path: "s1/a",
-				Type: "rename",
+				Type: syncd.Rename,
 			},
 			{
 				Path: "s2/a",
-				Type: "create",
+				Type: syncd.Create,
 				Size: 0,
 			},
 			{
 				Path: "s2/a",
-				Type: "remove",
+				Type: syncd.Remove,
 			},
 		},
 	}
@@ -290,12 +290,12 @@ func TestEmptyDirsMovedBetweenSubdirs(t *testing.T) {
 		Chain{
 			{
 				Path: "s1",
-				Type: "create",
+				Type: syncd.Create,
 				Size: DIR_BLOCK_SIZE,
 			},
 			{
 				Path: "s1",
-				Type: "remove",
+				Type: syncd.Remove,
 			},
 		},
 	}
@@ -303,12 +303,12 @@ func TestEmptyDirsMovedBetweenSubdirs(t *testing.T) {
 		Chain{
 			{
 				Path: "s2",
-				Type: "create",
+				Type: syncd.Create,
 				Size: DIR_BLOCK_SIZE,
 			},
 			{
 				Path: "s2",
-				Type: "remove",
+				Type: syncd.Remove,
 			},
 		},
 	}
@@ -316,21 +316,21 @@ func TestEmptyDirsMovedBetweenSubdirs(t *testing.T) {
 		Chain{
 			{
 				Path: "s1/s3",
-				Type: "create",
+				Type: syncd.Create,
 				Size: DIR_BLOCK_SIZE,
 			},
 			{
 				Path: "s1/s3",
-				Type: "rename",
+				Type: syncd.Rename,
 			},
 			{
 				Path: "s2/s3",
-				Type: "create",
+				Type: syncd.Create,
 				Size: DIR_BLOCK_SIZE,
 			},
 			{
 				Path: "s2/s3",
-				Type: "remove",
+				Type: syncd.Remove,
 			},
 		},
 	}
@@ -363,12 +363,12 @@ func TestNonEmptyDirsMovedBetweenSubdirs(t *testing.T) {
 		Chain{
 			{
 				Path: "s1",
-				Type: "create",
+				Type: syncd.Create,
 				Size: DIR_BLOCK_SIZE,
 			},
 			{
 				Path: "s1",
-				Type: "remove",
+				Type: syncd.Remove,
 			},
 		},
 	}
@@ -376,12 +376,12 @@ func TestNonEmptyDirsMovedBetweenSubdirs(t *testing.T) {
 		Chain{
 			{
 				Path: "s2",
-				Type: "create",
+				Type: syncd.Create,
 				Size: DIR_BLOCK_SIZE,
 			},
 			{
 				Path: "s2",
-				Type: "remove",
+				Type: syncd.Remove,
 			},
 		},
 	}
@@ -389,21 +389,21 @@ func TestNonEmptyDirsMovedBetweenSubdirs(t *testing.T) {
 		Chain{
 			{
 				Path: "s1/s3",
-				Type: "create",
+				Type: syncd.Create,
 				Size: DIR_BLOCK_SIZE,
 			},
 			{
 				Path: "s1/s3",
-				Type: "rename",
+				Type: syncd.Rename,
 			},
 			{
 				Path: "s2/s3",
-				Type: "create",
+				Type: syncd.Create,
 				Size: DIR_BLOCK_SIZE,
 			},
 			{
 				Path: "s2/s3",
-				Type: "remove",
+				Type: syncd.Remove,
 			},
 		},
 	}
@@ -411,11 +411,11 @@ func TestNonEmptyDirsMovedBetweenSubdirs(t *testing.T) {
 		Chain{
 			{
 				Path: "s1/s3/a",
-				Type: "create",
+				Type: syncd.Create,
 			},
 			{
 				Path: "s2/s3/a",
-				Type: "remove",
+				Type: syncd.Remove,
 			},
 		},
 	}
@@ -450,12 +450,12 @@ func TestMoveNonEmptySubdirThenMoveFileOut(t *testing.T) {
 		Chain{
 			{
 				Path: "s1",
-				Type: "create",
+				Type: syncd.Create,
 				Size: DIR_BLOCK_SIZE,
 			},
 			{
 				Path: "s1",
-				Type: "remove",
+				Type: syncd.Remove,
 			},
 		},
 	}
@@ -463,12 +463,12 @@ func TestMoveNonEmptySubdirThenMoveFileOut(t *testing.T) {
 		Chain{
 			{
 				Path: "s2",
-				Type: "create",
+				Type: syncd.Create,
 				Size: DIR_BLOCK_SIZE,
 			},
 			{
 				Path: "s2",
-				Type: "remove",
+				Type: syncd.Remove,
 			},
 		},
 	}
@@ -476,12 +476,12 @@ func TestMoveNonEmptySubdirThenMoveFileOut(t *testing.T) {
 		Chain{
 			{
 				Path: "s2/s4",
-				Type: "create",
+				Type: syncd.Create,
 				Size: DIR_BLOCK_SIZE,
 			},
 			{
 				Path: "s2/s4",
-				Type: "remove",
+				Type: syncd.Remove,
 			},
 		},
 	}
@@ -489,21 +489,21 @@ func TestMoveNonEmptySubdirThenMoveFileOut(t *testing.T) {
 		Chain{
 			{
 				Path: "s1/s3",
-				Type: "create",
+				Type: syncd.Create,
 				Size: DIR_BLOCK_SIZE,
 			},
 			{
 				Path: "s1/s3",
-				Type: "rename",
+				Type: syncd.Rename,
 			},
 			{
 				Path: "s2/s4/s3",
-				Type: "create",
+				Type: syncd.Create,
 				Size: DIR_BLOCK_SIZE,
 			},
 			{
 				Path: "s2/s4/s3",
-				Type: "remove",
+				Type: syncd.Remove,
 			},
 		},
 	}
@@ -511,21 +511,21 @@ func TestMoveNonEmptySubdirThenMoveFileOut(t *testing.T) {
 		Chain{
 			{
 				Path: "s1/s3/a",
-				Type: "create",
+				Type: syncd.Create,
 				Size: 0,
 			},
 			{
 				Path: "s2/s4/s3/a",
-				Type: "rename",
+				Type: syncd.Rename,
 			},
 			{
 				Path: "s1/a",
-				Type: "create",
+				Type: syncd.Create,
 				Size: 0,
 			},
 			{
 				Path: "s1/a",
-				Type: "remove",
+				Type: syncd.Remove,
 			},
 		},
 	}
@@ -563,23 +563,23 @@ func TestInodeReuseByTouch(t *testing.T) {
 		Chain{
 			{
 				Path: "a",
-				Type: "create",
+				Type: syncd.Create,
 				Size: 0,
 			},
 			{
 				Path: "a",
-				Type: "remove",
+				Type: syncd.Remove,
 			},
 		},
 		Chain{
 			{
 				Path: "a",
-				Type: "create",
+				Type: syncd.Create,
 				Size: 0,
 			},
 			{
 				Path: "a",
-				Type: "remove",
+				Type: syncd.Remove,
 			},
 		},
 	}
@@ -609,28 +609,28 @@ func TestFileReuseByMove(t *testing.T) {
 		Chain{
 			{
 				Path: "a",
-				Type: "create",
+				Type: syncd.Create,
 				Size: 0,
 			},
 		},
 		Chain{
 			{
 				Path: "b",
-				Type: "create",
+				Type: syncd.Create,
 				Size: 0,
 			},
 			{
 				Path: "b",
-				Type: "rename",
+				Type: syncd.Rename,
 			},
 			{
 				Path: "a",
-				Type: "create",
+				Type: syncd.Create,
 				Size: 0,
 			},
 			{
 				Path: "a",
-				Type: "remove",
+				Type: syncd.Remove,
 			},
 		},
 	}
@@ -666,18 +666,18 @@ func TestFileCopiedThenRemoved(t *testing.T) {
 		Chain{
 			{
 				Path: "a",
-				Type: "create",
+				Type: syncd.Create,
 				Size: 0,
 			},
 			{
 				Path: "a",
-				Type: "write",
+				Type: syncd.Write,
 				Size: uint64(len(content)),
 				Hash: &hash,
 			},
 			{
 				Path: "a",
-				Type: "remove",
+				Type: syncd.Remove,
 			},
 		},
 	}
@@ -685,18 +685,18 @@ func TestFileCopiedThenRemoved(t *testing.T) {
 		Chain{
 			{
 				Path: "b",
-				Type: "create",
+				Type: syncd.Create,
 				Size: 0,
 			},
 			{
 				Path: "b",
-				Type: "write",
+				Type: syncd.Write,
 				Size: uint64(len(content)),
 				Hash: &hash,
 			},
 			{
 				Path: "b",
-				Type: "remove",
+				Type: syncd.Remove,
 			},
 		},
 	}

@@ -37,11 +37,28 @@ type DirEvent struct {
 // TODO: make "enum"
 type FileEvent struct {
 	Name      string           // the name of the underlying event (full path)
-	Type      string           // "create", "modify", "delete", "rename"
+	Type      EventType        // "create", "modify", "delete", "rename"
 	Timestamp time.Time        // time event processed
 	State     *fnode.NodeState // node state
 	Next      *FileEvent       // next event for this node
 	Prev      *FileEvent       // previous event for this node
+}
+
+func (t EventType) String() string {
+	switch t {
+	case Chmod:
+		return "chmod"
+	case Create:
+		return "create"
+	case Remove:
+		return "remove"
+	case Rename:
+		return "rename"
+	case Write:
+		return "write"
+	default:
+		panic(fmt.Sprintf("unexpected syncd.FileEventType: %#v", t))
+	}
 }
 
 func (w *Watcher) getDirForEvent(name string) (*string, *Dir) {
@@ -127,14 +144,14 @@ func RunWatcher(watcher *Watcher) {
 			}
 			watcher.processedChanTx <- *fileEvent
 			// add new directories to watcher
-			if fileEvent.Type == "create" && dirEvent.node.Type() == fnode.DIR {
+			if fileEvent.Type == Create && dirEvent.node.Type() == fnode.DIR {
 				logger.Trace(fmt.Sprintf("Watching new dir: %q", fileEvent.Name))
 				// TODO: is it necessary to do recursive calls here?
 				err := recursiveWatcherAdd(inner, fileEvent.Name)
 				if err != nil {
 					logger.Error(fmt.Sprintf("Failed to add %q to watcher.\n", fileEvent.Name))
 				}
-			} else if fileEvent.Type == "rename" || fileEvent.Type == "remove" {
+			} else if fileEvent.Type == Rename || fileEvent.Type == Remove {
 				err := recursiveWatcherRemove(inner, fileEvent.Name)
 				if err != nil {
 					logger.Error(fmt.Sprintf("Failed to add %q to watcher.\n", fileEvent.Name))
@@ -187,7 +204,7 @@ func updateStoreForLocalState(topDir string, managedDir ManagedDirectory, nodes 
 			event := &Event{
 				Timestamp: time.Now(),
 				Path:      fnode.GetRelativePath(node.Path, dirName),
-				Type:      "create",
+				Type:      Create,
 				Size:      state.Size,
 				Hash:      state.Hash,
 				ModTime:   state.ModTime,
@@ -249,7 +266,7 @@ func handleEvent(dirEvent *DirEvent, store EventStore) error {
 		return err
 	}
 	// add new chain for new nodes
-	if fileEvent.Type == "create" && dirEvent.chain == nil {
+	if fileEvent.Type == Create && dirEvent.chain == nil {
 		// create and new chain
 		dirEvent.chain, err = store.AddChain(Chain{
 			Ino: dirEvent.node.Ino(),
@@ -286,15 +303,15 @@ func toFileEvent(event *fsnotify.Event) *FileEvent {
 		Timestamp: time.Now(),
 	}
 	// set internal type
-	switch {
-	case eventIs(fsnotify.Create, event):
-		fileEvent.Type = "create"
-	case eventIs(fsnotify.Write, event):
-		fileEvent.Type = "write"
-	case eventIs(fsnotify.Remove, event):
-		fileEvent.Type = "remove"
-	case eventIs(fsnotify.Rename, event):
-		fileEvent.Type = "rename"
+	switch event.Op {
+	case fsnotify.Create:
+		fileEvent.Type = Create
+	case fsnotify.Write:
+		fileEvent.Type = Write
+	case fsnotify.Remove:
+		fileEvent.Type = Remove
+	case fsnotify.Rename:
+		fileEvent.Type = Rename
 	default:
 		return nil
 	}
@@ -306,13 +323,13 @@ func toFileEvent(event *fsnotify.Event) *FileEvent {
 // the node is used to: detect new dirs, lookup chains by ino, set event state
 func setNode(dirEvent *DirEvent) error {
 	switch dirEvent.fileEvent.Type {
-	case "create", "write":
+	case Create, Write:
 		node, err := fnode.NewNode(dirEvent.fileEvent.Name)
 		if err != nil {
 			return err
 		}
 		dirEvent.node = node
-	case "rename", "remove":
+	case Rename, Remove:
 	default:
 		return errors.ErrUnsupported
 	}
@@ -328,9 +345,9 @@ func lkpChain(dirEvent *DirEvent, store EventStore) error {
 	var chain *Chain
 
 	switch dirEvent.fileEvent.Type {
-	case "create", "write":
+	case Create, Write:
 		chain, _ = store.GetChainByIno(dirEvent.node.Ino())
-	case "remove", "rename":
+	case Remove, Rename:
 		chain, _ = store.GetChainByPath(
 			dirEvent.dirID,
 			fnode.GetRelativePath(dirEvent.fileEvent.Name, dirEvent.dirName),
@@ -347,14 +364,14 @@ func isValidEvent(dirEvent *DirEvent) error {
 	node := dirEvent.node
 	chain := dirEvent.chain
 	switch dirEvent.fileEvent.Type {
-	case "create":
+	case Create:
 		if node == nil {
 			return errors.New("create w/ no node")
 		}
 		if node.Type() < 1 {
 			return errors.New(fmt.Sprintf("create unsupported node: %v", node))
 		}
-	case "write":
+	case Write:
 		if node == nil {
 			return errors.New("write w/ no node")
 		}
@@ -364,11 +381,11 @@ func isValidEvent(dirEvent *DirEvent) error {
 		if chain == nil {
 			return errors.New(fmt.Sprintf("write w/ no chain"))
 		}
-	case "rename":
+	case Rename:
 		if chain == nil {
 			return errors.New(fmt.Sprintf("rename w/ no chain"))
 		}
-	case "remove":
+	case Remove:
 		if chain == nil {
 			return errors.New(fmt.Sprintf("remove w/ no chain"))
 		}
@@ -380,14 +397,14 @@ func isValidEvent(dirEvent *DirEvent) error {
 
 func setEventState(event *Event, node *fnode.Node) {
 	switch event.Type {
-	case "create":
+	case Create:
 		logger.Trace(fmt.Sprintf("Create event: %s", node.String()))
 		// set event node state props
 		nodeState := node.State()
 		event.ModTime = node.ModTime()
 		event.Size = node.Size()
 		event.Hash = nodeState.Hash
-	case "write":
+	case Write:
 		logger.Trace(fmt.Sprintf("Write event: %s", node.String()))
 		// set event node state props
 		nodeState := node.State()
@@ -396,8 +413,4 @@ func setEventState(event *Event, node *fnode.Node) {
 		event.Hash = nodeState.Hash
 	default:
 	}
-}
-
-func eventIs(op fsnotify.Op, event *fsnotify.Event) bool {
-	return event.Op&op == op
 }

@@ -7,17 +7,36 @@ import (
 	"github.com/google/uuid"
 )
 
+// Internal "Op" enum
+type EventType uint32
+
+// fsnotify events are processed to internal structures
+// for now we only care about a few
+const (
+	// new file created
+	Create EventType = 1 << iota
+
+	// bytes written to file (or truncation)
+	Write
+
+	// file deleted
+	Remove
+
+	// file moved
+	Rename
+
+	// various events including attribute change and file writes
+	Chmod
+)
+
 type Dir struct {
 	ID   uuid.UUID // should be generated when adding
 	Path string    // relative to configured top-level directory
 }
 
 type Chain struct {
-	ID uuid.UUID // should be generated when adding
-	// DirID uuid.UUID // ID of chain's directory
-	Ino uint64 // the local inode
-	// HeadID uuid.UUID // the first event in the chain
-	// TailID uuid.UUID // the last event in the chain
+	ID  uuid.UUID // should be generated when adding
+	Ino uint64    // the local inode
 }
 
 type Event struct {
@@ -25,12 +44,10 @@ type Event struct {
 	// DirID     uuid.UUID // ID of managed dir
 	Timestamp time.Time // timestamp of the event
 	Path      string    // relative to DirName
-	Type      string    // create, remove, rename, write, chmod
+	Type      EventType // create, remove, rename, write, chmod
 	Size      uint64    // file size
 	Hash      *string   // file hash (null for non-files)
 	ModTime   time.Time // modification time
-	// PrevID    uuid.UUID // the previous event ID
-	// NextID    uuid.UUID // the next event ID
 }
 
 type EventStore interface {

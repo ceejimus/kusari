@@ -55,7 +55,7 @@ func setupStoreFromLocalState(tmpFs *utils.TmpFs, managedDirs []syncd.ManagedDir
 			event := &syncd.Event{
 				Timestamp: time.Now(),
 				Path:      fnode.GetRelativePath(node.Path, dirPath),
-				Type:      "create",
+				Type:      syncd.Create,
 				Size:      state.Size,
 				Hash:      state.Hash,
 				ModTime:   state.ModTime,
