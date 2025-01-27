@@ -18,9 +18,17 @@ func main() {
 		os.Exit(1)
 	}
 
+	err = config.Validate()
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "Invalid config\n%s\n", err.Error())
+		os.Exit(1)
+	}
+
 	logger.Init(config.LogLevel)
 
 	logger.Info(fmt.Sprintf("Running w/ config:%v\n", config))
+
+	store := syncd.NewMemStore()
 
 	managedMap, err := syncd.GetManagedMap(config.TopDir, config.ManagedDirectories)
 	if err != nil {
@@ -35,7 +43,12 @@ func main() {
 		}
 	}
 
-	watcher := syncd.InitWatcher(config.TopDir, config.ManagedDirectories, managedMap)
+	watcher, err := syncd.InitWatcher(config.TopDir, config.ManagedDirectories, managedMap, store)
+	if err != nil {
+		logger.Error(err.Error())
+		os.Exit(1) // TODO: gracefully handle these
+	}
+
 	go syncd.RunWatcher(watcher)
 
 	// db, err := initDb(config.DSN)
