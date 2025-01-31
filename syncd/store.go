@@ -3,8 +3,6 @@ package syncd
 import (
 	"fmt"
 	"time"
-
-	"github.com/google/uuid"
 )
 
 // Internal "Op" enum
@@ -30,18 +28,17 @@ const (
 )
 
 type Dir struct {
-	ID   uuid.UUID // should be generated when adding
-	Path string    // relative to configured top-level directory
+	ID   []byte // should be generated when adding
+	Path string // relative to configured top-level directory
 }
 
 type Chain struct {
-	ID  uuid.UUID // should be generated when adding
-	Ino uint64    // the local inode
+	ID  []byte // should be generated when adding
+	Ino uint64 // the local inode
 }
 
 type Event struct {
-	ID uuid.UUID // should be generated when adding
-	// DirID     uuid.UUID // ID of managed dir
+	ID        []byte    // should be generated when adding
 	Timestamp time.Time // timestamp of the event
 	Path      string    // relative to DirName
 	Type      EventType // create, remove, rename, write, chmod
@@ -51,18 +48,19 @@ type Event struct {
 }
 
 type EventStore interface {
-	AddDir(dir Dir) (*Dir, error)                               // add a new syncd directory
-	AddChain(chain Chain, dirID uuid.UUID) (*Chain, error)      // add a new event chain
-	AddEvent(event Event, chainID uuid.UUID) (*Event, error)    // add a new event
-	GetDirByUUID(id uuid.UUID) (*Dir, bool)                     // get syncd directory by UUID
-	GetDirByPath(path string) (*Dir, bool)                      // get syncd dir by path
-	GetChainByUUID(id uuid.UUID) (*Chain, bool)                 // get chain by UUID
-	GetChainByPath(dirID uuid.UUID, path string) (*Chain, bool) // get chain whose tail is event w/ path
-	GetChainByIno(ino uint64) (*Chain, bool)                    // get chain by ino
-	GetEventByUUID(id uuid.UUID) (*Event, bool)                 // get event by UUID
-	GetDirs() []Dir                                             // get all stored dirs
-	GetChainsInDir(id uuid.UUID) ([]Chain, bool)                // get all chains in directory w/ ID
-	GetEventsInChain(id uuid.UUID) ([]Event, bool)              // get all events in chain w/ ID
+	AddDir(dir Dir) (*Dir, error)                            // add a new syncd directory
+	AddChain(chain Chain, dirID []byte) (*Chain, error)      // add a new event chain
+	AddEvent(event Event, chainID []byte) (*Event, error)    // add a new event
+	GetDirByID(id []byte) (*Dir, bool)                       // get syncd directory by ID
+	GetDirByPath(path string) (*Dir, bool)                   // get syncd dir by path
+	GetChainByID(id []byte) (*Chain, bool)                   // get chain by ID
+	GetChainByPath(dirID []byte, path string) (*Chain, bool) // get chain whose tail is event w/ path
+	GetChainByIno(ino uint64) (*Chain, bool)                 // get chain by ino
+	GetEventByID(id []byte) (*Event, bool)                   // get event by ID
+	GetDirs() []Dir                                          // get all stored dirs
+	GetChainsInDir(id []byte) ([]Chain, bool)                // get all chains in directory w/ ID
+	GetEventsInChain(id []byte) ([]Event, bool)              // get all events in chain w/ ID
+	Close() error                                            // something for owners to call to cleanup underlying resources
 }
 
 func (d Dir) String() string {

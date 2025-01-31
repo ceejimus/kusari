@@ -11,6 +11,7 @@ import (
 
 	"atmoscape.net/fileserver/fnode"
 	"atmoscape.net/fileserver/logger"
+	"atmoscape.net/fileserver/memstore"
 	"atmoscape.net/fileserver/syncd"
 	"atmoscape.net/fileserver/utils"
 	"github.com/stretchr/testify/assert"
@@ -46,14 +47,14 @@ func setup() {
 	var statfs unix.Statfs_t
 	err = unix.Statfs(wd, &statfs)
 	if err != nil {
-		logger.Error(fmt.Sprintf("Faild to stat wd %q: %s", wd, err))
+		logger.Error(fmt.Sprintf("Failed to stat wd %q: %s", wd, err))
 		os.Exit(-1)
 	}
 	DIR_BLOCK_SIZE = uint64(statfs.Bsize)
 }
 
 // test a remove for a single file
-func TestFileRemove(t *testing.T) {
+func TestExistingFileRemove(t *testing.T) {
 	content := []byte("i am a")
 	hash, err := fnode.GetHash(bytes.NewBuffer(content))
 	if err != nil {
@@ -746,7 +747,7 @@ func initApiTest(t *testing.T, tmpFs *utils.TmpFs) ApiTestWrapper {
 		t.Fatal(err)
 	}
 
-	store := syncd.NewMemStore()
+	store := memstore.NewMemStore()
 	managedDir := syncd.ManagedDirectory{Path: tmpFs.Dirs[0].Name}
 
 	if err := setupStoreFromLocalState(tmpFs, []syncd.ManagedDirectory{managedDir}, store); err != nil {
@@ -771,7 +772,7 @@ func initApiTest(t *testing.T, tmpFs *utils.TmpFs) ApiTestWrapper {
 	return ApiTestWrapper{store: store, watcher: watcher}
 }
 
-func takeActions(t *testing.T, actions []utils.FsAction, rx <-chan syncd.FileEvent) {
+func takeActions(t *testing.T, actions []utils.FsAction, rx <-chan syncd.NodeEvent) {
 	for _, action := range actions {
 		n := 1
 		dstExists := true

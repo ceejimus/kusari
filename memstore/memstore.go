@@ -1,4 +1,4 @@
-package syncd
+package memstore
 
 import (
 	"errors"
@@ -7,6 +7,7 @@ import (
 	"sync"
 	"time"
 
+	"atmoscape.net/fileserver/syncd"
 	"github.com/google/uuid"
 )
 
@@ -37,16 +38,16 @@ type MemChain struct {
 }
 
 type MemEvent struct {
-	ID        uuid.UUID // id
-	Chain     *MemChain // the chain this event is in
-	Type      EventType // "create", "modify", "delete", "rename", etc.
-	Timestamp time.Time // time event processed
-	Path      string    // relative path of file
-	ModTime   time.Time // modification time
-	Hash      *string   // file hash (if file)
-	Size      uint64    // file size
-	Next      *MemEvent // next event for this node
-	Prev      *MemEvent // previous event for this node
+	ID        uuid.UUID       // id
+	Chain     *MemChain       // the chain this event is in
+	Type      syncd.EventType // "create", "modify", "delete", "rename", etc.
+	Timestamp time.Time       // time event processed
+	Path      string          // relative path of file
+	ModTime   time.Time       // modification time
+	Hash      *string         // file hash (if file)
+	Size      uint64          // file size
+	Next      *MemEvent       // next event for this node
+	Prev      *MemEvent       // previous event for this node
 }
 
 type MemStore struct {
@@ -182,35 +183,70 @@ func NewMemStore() *MemStore {
 	}
 }
 
-func (s *MemStore) AddDir(dir Dir) (*Dir, error) {
+func (s *MemStore) AddDir(dir syncd.Dir) (*syncd.Dir, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	return addDir(s, dir)
+	memDir := MemDir{Path: dir.Path}
+	if err := addDir(s, &memDir); err != nil {
+		return nil, err
+	}
+	newDir := toDir(&memDir)
+	return newDir, nil
 }
 
-func (s *MemStore) AddChain(chain Chain, dirID uuid.UUID) (*Chain, error) {
+func (s *MemStore) AddChain(chain syncd.Chain, dirID []byte) (*syncd.Chain, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	return addChain(s, chain, dirID)
+	dirUUID, err := uuid.FromBytes(dirID)
+	if err != nil {
+		return nil, errors.New(fmt.Sprintf("Cannot add new chain, cannot parse dirID to UUID: %v", dirID))
+	}
+	memChain := MemChain{Ino: chain.Ino}
+	if err := addChain(s, &memChain, dirUUID); err != nil {
+		return nil, err
+	}
+	newChain := toChain(&memChain)
+	return newChain, nil
 }
 
-func (s *MemStore) AddEvent(event Event, chainID uuid.UUID) (*Event, error) {
+func (s *MemStore) AddEvent(event syncd.Event, chainID []byte) (*syncd.Event, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	return addEvent(s, event, chainID)
+	chainUUID, err := uuid.FromBytes(chainID)
+	if err != nil {
+		return nil, errors.New(fmt.Sprintf("Cannot add event, cannot parse chainID to UUID: %v", chainID))
+	}
+
+	memEvent := MemEvent{
+		Path:      event.Path,
+		Type:      event.Type,
+		Timestamp: event.Timestamp,
+		ModTime:   event.ModTime,
+		Hash:      event.Hash,
+		Size:      event.Size,
+	}
+	if err := addEvent(s, &memEvent, chainUUID); err != nil {
+		return nil, err
+	}
+	newEvent := toEvent(&memEvent)
+	return newEvent, nil
 }
 
-func (s *MemStore) GetDirByUUID(id uuid.UUID) (*Dir, bool) {
+func (s *MemStore) GetDirByID(id []byte) (*syncd.Dir, bool) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	memDir, ok := getDirByUUID(s, id)
+	dirUUID, err := uuid.FromBytes(id)
+	if err != nil {
+		return nil, false
+	}
+	memDir, ok := getDirByUUID(s, dirUUID)
 	if !ok {
 		return nil, false
 	}
 	return toDir(memDir), true
 }
 
-func (s *MemStore) GetDirByPath(path string) (*Dir, bool) {
+func (s *MemStore) GetDirByPath(path string) (*syncd.Dir, bool) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	memDir, ok := getDirByPath(s, path)
@@ -220,32 +256,40 @@ func (s *MemStore) GetDirByPath(path string) (*Dir, bool) {
 	return toDir(memDir), true
 }
 
-func (s *MemStore) GetChainByUUID(id uuid.UUID) (*Chain, bool) {
+func (s *MemStore) GetChainByID(id []byte) (*syncd.Chain, bool) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	memChain, ok := getChainByUUID(s, id)
+	chainUUID, err := uuid.FromBytes(id)
+	if err != nil {
+		return nil, false
+	}
+	memChain, ok := getChainByID(s, chainUUID)
 	if !ok {
 		return nil, false
 	}
 	return toChain(memChain), true
 }
 
-func (s *MemStore) GetChainByPath(dirID uuid.UUID, path string) (*Chain, bool) {
+func (s *MemStore) GetChainByPath(dirID []byte, path string) (*syncd.Chain, bool) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	_, ok := getDirByUUID(s, dirID)
+	dirUUID, err := uuid.FromBytes(dirID)
+	if err != nil {
+		return nil, false
+	}
+	_, ok := getDirByUUID(s, dirUUID)
 	if !ok {
 		return nil, false
 	}
 
-	memChain, ok := getChainByPath(s, dirID, path)
+	memChain, ok := getChainByPath(s, dirUUID, path)
 	if !ok {
 		return nil, false
 	}
 	return toChain(memChain), true
 }
 
-func (s *MemStore) GetChainByIno(ino uint64) (*Chain, bool) {
+func (s *MemStore) GetChainByIno(ino uint64) (*syncd.Chain, bool) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	memChain, ok := getChainByIno(s, ino)
@@ -255,25 +299,33 @@ func (s *MemStore) GetChainByIno(ino uint64) (*Chain, bool) {
 	return toChain(memChain), true
 }
 
-func (s *MemStore) GetEventByUUID(id uuid.UUID) (*Event, bool) {
+func (s *MemStore) GetEventByID(id []byte) (*syncd.Event, bool) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	memEvent, ok := getEventByUUID(s, id)
+	eventUUID, err := uuid.FromBytes(id)
+	if err != nil {
+		return nil, false
+	}
+	memEvent, ok := getEventByUUID(s, eventUUID)
 	if !ok {
 		return nil, false
 	}
 	return toEvent(memEvent), true
 }
 
-func (s *MemStore) GetEventsInChain(id uuid.UUID) ([]Event, bool) {
+func (s *MemStore) GetEventsInChain(id []byte) ([]syncd.Event, bool) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	memChain, ok := getChainByUUID(s, id)
+	chainUUID, err := uuid.FromBytes(id)
+	if err != nil {
+		return nil, false
+	}
+	memChain, ok := getChainByID(s, chainUUID)
 	if !ok {
-		return []Event{}, false
+		return []syncd.Event{}, false
 	}
 
-	events := make([]Event, 0)
+	events := make([]syncd.Event, 0)
 
 	curr := memChain.Head
 	for curr != nil {
@@ -284,10 +336,10 @@ func (s *MemStore) GetEventsInChain(id uuid.UUID) ([]Event, bool) {
 	return events, true
 }
 
-func (s *MemStore) GetDirs() []Dir {
+func (s *MemStore) GetDirs() []syncd.Dir {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	dirs := make([]Dir, len(s.dirIDMap))
+	dirs := make([]syncd.Dir, len(s.dirIDMap))
 	i := 0
 	for _, memDir := range s.dirIDMap {
 		dirs[i] = *toDir(memDir)
@@ -296,15 +348,19 @@ func (s *MemStore) GetDirs() []Dir {
 	return dirs
 }
 
-func (s *MemStore) GetChainsInDir(id uuid.UUID) ([]Chain, bool) {
+func (s *MemStore) GetChainsInDir(id []byte) ([]syncd.Chain, bool) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	memDir, ok := getDirByUUID(s, id)
+	dirUUID, err := uuid.FromBytes(id)
+	if err != nil {
+		return nil, false
+	}
+	memDir, ok := getDirByUUID(s, dirUUID)
 	if !ok {
 		return nil, false
 	}
 
-	chains := make([]Chain, len(memDir.Chains))
+	chains := make([]syncd.Chain, len(memDir.Chains))
 
 	for i, memChain := range memDir.Chains {
 		chains[i] = *toChain(memChain)
@@ -313,83 +369,68 @@ func (s *MemStore) GetChainsInDir(id uuid.UUID) ([]Chain, bool) {
 	return chains, true
 }
 
+func (s *MemStore) Close() error { return nil } // nothing to clean up
+
 // this function should error if:
 //   - dir input has ID != uuid.Nil
 //   - record exists w/ dir.Path
-func addDir(s *MemStore, dir Dir) (*Dir, error) {
-	if dir.ID != uuid.Nil {
-		return nil, errors.New(fmt.Sprintf("Cannot add new dir, non-nil ID %s", dir))
+func addDir(s *MemStore, memDir *MemDir) error {
+	if memDir.ID != uuid.Nil {
+		return errors.New(fmt.Sprintf("Cannot add new dir, non-nil ID %v", memDir))
 	}
-	_, ok := getDirByPath(s, dir.Path)
+	_, ok := getDirByPath(s, memDir.Path)
 	if ok {
-		return nil, errors.New(fmt.Sprintf("Cannot add new dir, existing record %s", dir))
+		return errors.New(fmt.Sprintf("Cannot add new dir, existing record %v", memDir))
 	}
 
-	memDir := toMemDir(&dir)
 	memDir.ID = uuid.New()
 	memDir.Chains = make([]*MemChain, 0)
 	memDir.ChainLkp = make(chainPathLkp)
 	memDir.ChainLkp[uuid.Nil] = make(chainMap)
 
-	dir.ID = memDir.ID
-
 	s.dirIDMap[memDir.ID] = memDir
 	s.dirPathMap[memDir.Path] = memDir
 
-	return &dir, nil
+	return nil
 }
 
 // this function should error if:
 //   - chain input has ID != uuid.Nil
 //   - is orphaned by dir
 //   - missing head or tail
-func addChain(s *MemStore, chain Chain, dirID uuid.UUID) (*Chain, error) {
-	if chain.ID != uuid.Nil {
-		return nil, errors.New(fmt.Sprintf("Cannot add new chain, non-nil ID %s", chain))
+func addChain(s *MemStore, memChain *MemChain, dirID uuid.UUID) error {
+	if memChain.ID != uuid.Nil {
+		return errors.New(fmt.Sprintf("Cannot add new chain, non-nil ID %v", memChain))
 	}
 
 	dir, ok := getDirByUUID(s, dirID)
 	if !ok {
-		return nil, errors.New(fmt.Sprintf("Cannot add new chain, non-existent dir %s", dirID))
-	}
-
-	memChain, err := toMemChain(&chain)
-	if err != nil {
-		return nil, err
+		return errors.New(fmt.Sprintf("Cannot add new chain, non-existent dir %s", dirID))
 	}
 
 	memChain.ID = uuid.New()
 	memChain.Dir = dir
-
-	chain.ID = memChain.ID
 
 	s.chainIDMap[memChain.ID] = memChain
 	s.chainInoMap[memChain.Ino] = memChain
 
 	dir.Chains = append(dir.Chains, memChain)
 
-	return &chain, nil
+	return nil
 }
 
-func addEvent(s *MemStore, event Event, chainID uuid.UUID) (*Event, error) {
-	if event.ID != uuid.Nil {
-		return nil, errors.New(fmt.Sprintf("Cannot add new event, non-nil ID %s", event))
+func addEvent(s *MemStore, memEvent *MemEvent, chainID uuid.UUID) error {
+	if memEvent.ID != uuid.Nil {
+		return errors.New(fmt.Sprintf("Cannot add new event, non-nil ID %v", memEvent))
 	}
 
-	memChain, ok := getChainByUUID(s, chainID)
+	memChain, ok := getChainByID(s, chainID)
 	if !ok {
-		return nil, errors.New(fmt.Sprintf("Cannot add new event, non-existent chain: %s", chainID))
-	}
-
-	memEvent, err := toMemEvent(&event)
-	if err != nil {
-		return nil, err
+		return errors.New(fmt.Sprintf("Cannot add new event, non-existent chain: %s", chainID))
 	}
 
 	memEvent.ID = uuid.New()
 	memEvent.Chain = memChain
-
-	event.ID = memEvent.ID
 
 	s.eventIDMap[memEvent.ID] = memEvent
 
@@ -401,23 +442,23 @@ func addEvent(s *MemStore, event Event, chainID uuid.UUID) (*Event, error) {
 		memChain.Tail.Next = memEvent
 	}
 
-	err = updateChainLkps(s, memChain, memEvent)
+	err := updateChainLkps(s, memChain, memEvent)
 	if err != nil {
-		return nil, err
+		return err
 	}
 
 	memChain.Tail = memEvent
 
-	return &event, nil
+	return nil
 }
 
 func updateChainLkps(s *MemStore, memChain *MemChain, memEvent *MemEvent) error {
 	// sprinkle some fairy dust for path lookups after renames
-	if memEvent.Type == Create && memChain.Tail != nil && memChain.Tail.Type == Rename {
+	if memEvent.Type == syncd.Create && memChain.Tail != nil && memChain.Tail.Type == syncd.Rename {
 		if err := memChain.Dir.ChainLkp.move(memEvent.Path, memChain.Tail.Path); err != nil {
 			return err
 		}
-	} else if memEvent.Type == Remove {
+	} else if memEvent.Type == syncd.Remove {
 		delete(s.chainInoMap, memChain.Ino)
 		memChain.Dir.ChainLkp.delete(memEvent.Path)
 	} else {
@@ -436,7 +477,7 @@ func getDirByUUID(s *MemStore, id uuid.UUID) (*MemDir, bool) {
 	return memDir, ok
 }
 
-func getChainByUUID(s *MemStore, id uuid.UUID) (*MemChain, bool) {
+func getChainByID(s *MemStore, id uuid.UUID) (*MemChain, bool) {
 	memChain, ok := s.chainIDMap[id]
 	return memChain, ok
 }
@@ -465,37 +506,23 @@ func getDirByPath(s *MemStore, path string) (*MemDir, bool) {
 	return memDir, ok
 }
 
-func toDir(memDir *MemDir) *Dir {
-	return &Dir{
-		ID:   memDir.ID,
+func toDir(memDir *MemDir) *syncd.Dir {
+	return &syncd.Dir{
+		ID:   memDir.ID[:],
 		Path: memDir.Path,
 	}
 }
 
-func toMemDir(dir *Dir) *MemDir {
-	return &MemDir{
-		ID:   dir.ID,
-		Path: dir.Path,
-	}
-}
-
-func toChain(memChain *MemChain) *Chain {
-	return &Chain{
-		ID:  memChain.ID,
+func toChain(memChain *MemChain) *syncd.Chain {
+	return &syncd.Chain{
+		ID:  memChain.ID[:],
 		Ino: memChain.Ino,
 	}
 }
 
-func toMemChain(chain *Chain) (*MemChain, error) {
-	return &MemChain{
-		ID:  chain.ID,
-		Ino: chain.Ino,
-	}, nil
-}
-
-func toEvent(memEvent *MemEvent) *Event {
-	return &Event{
-		ID:        memEvent.ID,
+func toEvent(memEvent *MemEvent) *syncd.Event {
+	return &syncd.Event{
+		ID:        memEvent.ID[:],
 		Timestamp: time.Time{},
 		Path:      memEvent.Path,
 		Type:      memEvent.Type,
@@ -503,16 +530,4 @@ func toEvent(memEvent *MemEvent) *Event {
 		Hash:      memEvent.Hash,
 		ModTime:   memEvent.ModTime,
 	}
-}
-
-func toMemEvent(event *Event) (*MemEvent, error) {
-	return &MemEvent{
-		ID:        event.ID,
-		Path:      event.Path,
-		Type:      event.Type,
-		Timestamp: event.Timestamp,
-		ModTime:   event.ModTime,
-		Hash:      event.Hash,
-		Size:      event.Size,
-	}, nil
 }

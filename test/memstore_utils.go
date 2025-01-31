@@ -11,18 +11,7 @@ import (
 	"atmoscape.net/fileserver/utils"
 )
 
-type MemStoreInitState struct{}
-
-type MemStoreDirState struct{}
-
-type MemStoreChainState struct{}
-
-// func InitMemStore() (*syncd.MemStore, error) {
-//
-// }
-
 // this code was mostly stolen from watcher.go
-// this will evolve into a more flexible solution for testing purposes
 func setupStoreFromLocalState(tmpFs *utils.TmpFs, managedDirs []syncd.ManagedDirectory, store syncd.EventStore) error {
 	for _, dir := range managedDirs {
 		dirPath := filepath.Join(tmpFs.Path, dir.Path)

@@ -82,7 +82,7 @@ func (n *Node) State() NodeState {
 	}
 }
 
-func (n *Node) String() string {
+func (n Node) String() string {
 	var b strings.Builder
 	nodeTypeStr := "\\"
 	if n.Type() == FILE {
@@ -104,7 +104,7 @@ func (n *Node) String() string {
 	return b.String()
 }
 
-func (n *NodeState) String() string {
+func (n NodeState) String() string {
 	var b strings.Builder
 	b.WriteString(fmt.Sprintf("%.8d", n.Size))
 	//	01/02 03:04:05PM '06 -0700

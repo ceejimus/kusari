@@ -35,15 +35,15 @@ func GetManagedMap(topDir string, managedDirs []ManagedDirectory) (ManagedMap, e
 	return managedMap, nil
 }
 
-func GetManagedNodes(toDir string, managedDir ManagedDirectory) ([]fnode.Node, error) {
+func GetManagedNodes(topDir string, managedDir ManagedDirectory) ([]fnode.Node, error) {
 	managedFiles := make([]fnode.Node, 0)
 
 	inclGlobs := mapToGlobs(managedDir.Include)
 	exclGlobs := mapToGlobs(managedDir.Exclude)
 
-	fullDirPath := filepath.Join(toDir, managedDir.Path)
+	fullDirPath := filepath.Join(topDir, managedDir.Path)
 
-	logger.Trace(fmt.Sprintf("topdir: %q - managedDir.Path: %q - %q\n", toDir, managedDir.Path, fullDirPath))
+	logger.Trace(fmt.Sprintf("Walking managed dir topdir: %q - managedDir.Path: %q - %q\n", topDir, managedDir.Path, fullDirPath))
 	err := filepath.WalkDir(fullDirPath, func(path string, d fs.DirEntry, err error) error {
 
 		if err != nil {

@@ -15,11 +15,12 @@ const (
 	INFO
 	WARN
 	ERROR
+	FATAL
 )
 
 const DEFAULT_LOG_LEVEL = 2
 
-var logLevelNames = []string{"TRACE", "DEBUG", "INFO", "WARN", "ERROR"}
+var logLevelNames = []string{"TRACE", "DEBUG", "INFO", "WARN", "ERROR", "FATAL"}
 
 var logger Logger
 
@@ -77,6 +78,10 @@ func Warn(message string) {
 }
 
 func Error(message string) {
+	logger.log(ERROR, message)
+}
+
+func Fatal(message string) {
 	logger.log(ERROR, message)
 }
 
