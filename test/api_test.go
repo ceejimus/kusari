@@ -851,14 +851,14 @@ func compareWanted(t *testing.T, wantedMap DirPathToTailChainMap, store syncd.Ev
 		gotMap[d.Path] = dirChainMap
 		gotDirs = append(gotDirs, d.Path)
 		gotTailsMap[d.Path] = make([]string, 0)
-		chains, ok := store.GetChainsInDir(d.ID)
-		if !ok {
-			return errors.New(fmt.Sprintf("Failed to get chains in dir: %s", d))
+		chains, err := store.GetChainsInDir(d.ID)
+		if chains == nil || err != nil {
+			return errors.New(fmt.Sprintf("Failed to get chains in dir: %s\n%s", d, err))
 		}
 		for _, chain := range chains {
-			events, ok := store.GetEventsInChain(chain.ID)
-			if !ok {
-				return errors.New(fmt.Sprintf("Failed to get events in chain: %s", chain))
+			events, err := store.GetEventsInChain(chain.ID)
+			if events == nil || err != nil {
+				return errors.New(fmt.Sprintf("Failed to get events in chain: %s\n%s", chain, err))
 			}
 			tailPath := events[len(events)-1].Path
 			if indexOf(gotTailsMap[d.Path], tailPath) < 0 {

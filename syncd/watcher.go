@@ -190,7 +190,7 @@ func handleEvent(nodeEvent *NodeEvent, store EventStore) error {
 	if err = setNode(nodeEvent); err != nil {
 		return errors.New(fmt.Sprintf("Failed to set node for: %+v", *nodeEvent))
 	}
-	// lookup chain log for this event
+	// lookup chain for this event
 	if err = lkpChain(nodeEvent, store); err != nil {
 		return errors.New(fmt.Sprintf("Failed to find lookup Chain for event:  %v", nodeEvent))
 	}
@@ -200,25 +200,25 @@ func handleEvent(nodeEvent *NodeEvent, store EventStore) error {
 	}
 	// add new chain for new nodes
 	if nodeEvent.Type == Create && nodeEvent.chain == nil {
+		// create new chain
+		newChain := &Chain{Ino: nodeEvent.node.Ino()}
 		// create and new chain
-		if nodeEvent.chain, err = store.AddChain(
-			Chain{Ino: nodeEvent.node.Ino()},
-			nodeEvent.dir.ID,
-		); err != nil {
+		if err = store.AddChain(newChain, nodeEvent.dir.ID); err != nil {
 			logger.Fatal(err.Error())
 			os.Exit(1)
 		}
+		nodeEvent.chain = newChain
 	}
 	// create new event to store
-	event := Event{
+	event := &Event{
 		Timestamp: nodeEvent.Timestamp,
 		Path:      nodeEvent.Path,
 		Type:      nodeEvent.Type,
 	}
 	// set event state from node
-	setEventState(&event, nodeEvent.node)
+	setEventState(event, nodeEvent.node)
 	// add event to store
-	if _, err = store.AddEvent(event, nodeEvent.chain.ID); err != nil {
+	if err = store.AddEvent(event, nodeEvent.chain.ID); err != nil {
 		logger.Fatal(err.Error())
 		os.Exit(1)
 	}
@@ -270,21 +270,20 @@ func setNode(nodeEvent *NodeEvent) error {
 
 // lkpChain finds a chain in the event store for a given event
 // it uses inode lookup for creates/writes and paths for rename/remove
-// in order to perform the inode lookup, lkpChain must go to the filesystem anyways
-// so this function is also responsible for retrieving and returning node state
 func lkpChain(nodeEvent *NodeEvent, store EventStore) error {
 	var chain *Chain
+	var err error
 
 	switch nodeEvent.Type {
 	case Create, Write:
-		chain, _ = store.GetChainByIno(nodeEvent.node.Ino())
+		chain, err = store.GetChainByIno(nodeEvent.node.Ino())
 	case Remove, Rename:
-		chain, _ = store.GetChainByPath(
-			nodeEvent.dir.ID,
-			nodeEvent.Path,
-		)
+		chain, err = store.GetChainByPath(nodeEvent.dir.ID, nodeEvent.Path)
 	default:
 		return errors.ErrUnsupported
+	}
+	if err != nil {
+		return err
 	}
 	nodeEvent.chain = chain
 	return nil

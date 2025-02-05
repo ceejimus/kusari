@@ -38,14 +38,13 @@ func main() {
 		logger.Error(err.Error())
 		os.Exit(1)
 	}
-	newDir, err := badgerStore.AddDir(dir)
-	if err != nil {
+	if err = badgerStore.AddDir(&dir); err != nil {
 		logger.Error(err.Error())
 		os.Exit(1)
 	}
-	logger.Debug(fmt.Sprintf("New Dir: %+v", newDir))
-	gotDir, ok := badgerStore.GetDirByID(newDir.ID)
-	if !ok {
+	logger.Debug(fmt.Sprintf("New Dir: %+v", dir))
+	gotDir, err := badgerStore.GetDirByID(dir.ID)
+	if gotDir == nil || err != nil {
 		logger.Error("couldn't get dir")
 		os.Exit(1)
 	}
@@ -84,38 +83,42 @@ func updateStoreForLocalState(topDir string, managedDir syncd.ManagedDirectory, 
 	// TODO: ignore events based on globs
 	dirName := filepath.Join(topDir, managedDir.Path)
 
-	dir, ok := store.GetDirByPath(managedDir.Path)
+	dir, err := store.GetDirByPath(managedDir.Path)
+	if err != nil {
+		return nil, err
+	}
 
-	if !ok {
-		newDir := &syncd.Dir{
+	if dir == nil {
+		dir = &syncd.Dir{
 			Path: managedDir.Path,
 		}
-		newDir, err := store.AddDir(*newDir)
+		err := store.AddDir(dir)
 		if err != nil {
 			logger.Fatal(fmt.Sprintf("Failed to add dir to event store:\n%s", err.Error()))
 			os.Exit(1)
 		}
-		dir = newDir
 	}
 
 	// populate event logs w/ create events
 	for _, node := range nodes {
 		state := node.State()
 
-		_, ok := store.GetChainByPath(dir.ID, fnode.GetRelativePath(node.Path, dirName))
+		chain, err := store.GetChainByPath(dir.ID, fnode.GetRelativePath(node.Path, dirName))
+		if err != nil {
+			return nil, err
+		}
 
-		if !ok {
-			chain := &syncd.Chain{
+		if chain == nil {
+			chain = &syncd.Chain{
 				Ino: node.Ino(),
 			}
 
-			newChain, err := store.AddChain(*chain, dir.ID)
+			err := store.AddChain(chain, dir.ID)
 			if err != nil {
-				logger.Fatal(fmt.Sprintf("Failed to add event to event store:\n%s", err.Error()))
-				os.Exit(1)
+				return nil, err
 			}
 
-			event := &syncd.Event{
+			event := syncd.Event{
 				Timestamp: time.Now(),
 				Path:      fnode.GetRelativePath(node.Path, dirName),
 				Type:      syncd.Create,
@@ -124,10 +127,8 @@ func updateStoreForLocalState(topDir string, managedDir syncd.ManagedDirectory, 
 				ModTime:   state.ModTime,
 			}
 
-			_, err = store.AddEvent(*event, newChain.ID)
-			if err != nil {
-				logger.Fatal(fmt.Sprintf("Failed to add event to event store:\n%s", err.Error()))
-				os.Exit(1)
+			if err = store.AddEvent(&event, chain.ID); err != nil {
+				return nil, err
 			}
 		}
 	}

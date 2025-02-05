@@ -16,10 +16,10 @@ func setupStoreFromLocalState(tmpFs *utils.TmpFs, managedDirs []syncd.ManagedDir
 	for _, dir := range managedDirs {
 		dirPath := filepath.Join(tmpFs.Path, dir.Path)
 
-		newDir := &syncd.Dir{
+		newDir := syncd.Dir{
 			Path: dir.Path,
 		}
-		newDir, err := store.AddDir(*newDir)
+		err := store.AddDir(&newDir)
 		if err != nil {
 			return errors.New(fmt.Sprintf("Failed to add dir to event store:\n%s", err.Error()))
 		}
@@ -31,17 +31,17 @@ func setupStoreFromLocalState(tmpFs *utils.TmpFs, managedDirs []syncd.ManagedDir
 
 		// TODO: ignore nodes based on globs
 		for _, node := range nodes {
-			chain := &syncd.Chain{
+			chain := syncd.Chain{
 				Ino: node.Ino(),
 			}
 
-			newChain, err := store.AddChain(*chain, newDir.ID)
+			err := store.AddChain(&chain, newDir.ID)
 			if err != nil {
 				return errors.New(fmt.Sprintf("Failed to add event to event store:\n%s", err.Error()))
 			}
 
 			state := node.State()
-			event := &syncd.Event{
+			event := syncd.Event{
 				Timestamp: time.Now(),
 				Path:      fnode.GetRelativePath(node.Path, dirPath),
 				Type:      syncd.Create,
@@ -50,7 +50,7 @@ func setupStoreFromLocalState(tmpFs *utils.TmpFs, managedDirs []syncd.ManagedDir
 				ModTime:   state.ModTime,
 			}
 
-			_, err = store.AddEvent(*event, newChain.ID)
+			err = store.AddEvent(&event, chain.ID)
 			if err != nil {
 				return errors.New(fmt.Sprintf("Failed to add event to event store:\n%s", err.Error()))
 			}
