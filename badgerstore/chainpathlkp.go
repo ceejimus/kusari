@@ -6,34 +6,37 @@ import (
 	badger "github.com/dgraph-io/badger/v4"
 )
 
-func getChainIDByPath(txn *badger.Txn, dirID []byte, parentChainID []byte, path string) ([]byte, error) {
-	// get parent dir path and node name
-	dir, name := filepath.Split(path)
-	// create lkp prefix
-	chainMapPrefix := makeChainPathLkpPrefix(dirID, parentChainID)
-	// get chainID for our path
-	chainID, err := getValue(txn, makeKey(chainMapPrefix, []byte(name)))
-	if chainID == nil || err != nil {
-		return nil, err
+func getChainIDByPath(txn *badger.Txn, dirID []byte, path string) ([]byte, error) {
+	// the chain ID for the root path is the empty byte slice
+	currChainID := []byte{}
+	if path == "" { // caller wants root chainID
+		return currChainID, nil
 	}
-	if dir == "" {
-		return chainID, nil
+	// split path parts
+	pathParts := splitPath(path)
+	// iterate over path parts and lookup chains in path
+	for _, pathPart := range pathParts {
+		// get next chainID in path
+		chainID, err := getChainIDFromLkp(txn, dirID, currChainID, pathPart)
+		if chainID == nil || err != nil {
+			return chainID, err
+		}
+		currChainID = chainID
 	}
-	return getChainIDByPath(txn, dirID, chainID, name)
+
+	return currChainID, nil
 }
 
 func addChainPathLkp(txn *badger.Txn, dirID []byte, path string, chainID []byte) error {
 	// get parent dir path and node name
 	dir, name := filepath.Split(path)
 	// lookup dst parent chain id
-	parentChainID, err := getChainIDByPath(txn, dirID, []byte(""), dir)
+	parentChainID, err := getChainIDByPath(txn, dirID, dir)
 	if err != nil {
 		return err
 	}
-	// create lkp prefix
-	chainMapPrefix := makeChainPathLkpPrefix(dirID, parentChainID)
 	// set the value in lookup
-	if err := txn.Set(makeKey(chainMapPrefix, []byte(name)), chainID); err != nil {
+	if err := addChainIDToLkp(txn, dirID, parentChainID, name, chainID); err != nil {
 		return err
 	}
 	return nil
@@ -45,30 +48,26 @@ func moveChainPathLkp(txn *badger.Txn, dirID []byte, dstPath string, srcPath str
 	// get parent dir and name for src
 	srcDir, srcName := filepath.Split(srcPath)
 	// lookup dst parent chain id
-	dstDirParentChainID, err := getChainIDByPath(txn, dirID, []byte(""), dstDir)
+	dstDirParentChainID, err := getChainIDByPath(txn, dirID, dstDir)
 	if err != nil {
 		return err
 	}
 	// lookup src parent chain id
-	srcDirParentChainID, err := getChainIDByPath(txn, dirID, []byte(""), srcDir)
+	srcDirParentChainID, err := getChainIDByPath(txn, dirID, srcDir)
 	if err != nil {
 		return err
 	}
-	// make lkp prefix for dst chain
-	dstChainMapPrefix := makeChainPathLkpPrefix(dirID, dstDirParentChainID)
-	// make lkp prefix for src chain
-	srcChainMapPrefix := makeChainPathLkpPrefix(dirID, srcDirParentChainID)
 	// get the src chain ID
-	chainID, err := getValue(txn, makeKey(srcChainMapPrefix, []byte(srcName)))
+	chainID, err := getChainIDFromLkp(txn, dirID, srcDirParentChainID, srcName)
 	if chainID == nil || err != nil {
 		return err
 	}
 	// add chain ID to dst lkp
-	if err = txn.Set(makeKey(dstChainMapPrefix, []byte(dstName)), chainID); err != nil {
+	if err = addChainIDToLkp(txn, dirID, dstDirParentChainID, dstName, chainID); err != nil {
 		return err
 	}
 	// delete src lkp value
-	if err = txn.Delete(makeKey(srcChainMapPrefix, []byte(srcName))); err != nil {
+	if err = removeChainIDFromLkp(txn, dirID, srcDirParentChainID, srcName); err != nil {
 		return err
 	}
 	return nil
@@ -78,21 +77,34 @@ func deleteChainPathLkp(txn *badger.Txn, dirID []byte, path string) error {
 	// get parent dir and name
 	dir, name := filepath.Split(path)
 	// get chain ID for parent dir
-	parentChainID, err := getChainIDByPath(txn, dirID, []byte(""), dir)
+	parentChainID, err := getChainIDByPath(txn, dirID, dir)
 	if err != nil {
 		return err
 	}
-	// make lkp prefix for parent chain
-	chainMapPrefix := makeChainPathLkpPrefix(dirID, parentChainID)
 	// delete the path lkp from this chain
-	if err = txn.Delete(makeKey(chainMapPrefix, []byte(name))); err != nil {
+	if err = removeChainIDFromLkp(txn, dirID, parentChainID, name); err != nil {
 		return err
 	}
 	return nil
 }
 
+func getChainIDFromLkp(txn *badger.Txn, dirID []byte, parentChainID []byte, name string) ([]byte, error) {
+	chainMapPrefix := makeChainPathLkpPrefix(dirID, parentChainID)
+	return getValue(txn, makeKey(chainMapPrefix, []byte(name)))
+}
+
+func addChainIDToLkp(txn *badger.Txn, dirID []byte, parentChainID []byte, name string, chainID []byte) error {
+	chainMapPrefix := makeChainPathLkpPrefix(dirID, parentChainID)
+	return txn.Set(makeKey(chainMapPrefix, []byte(name)), chainID)
+}
+
+func removeChainIDFromLkp(txn *badger.Txn, dirID []byte, parentChainID []byte, name string) error {
+	chainMapPrefix := makeChainPathLkpPrefix(dirID, parentChainID)
+	return txn.Delete(makeKey(chainMapPrefix, []byte(name)))
+}
+
 func makeChainPathLkpPrefix(dirID []byte, parentChainID []byte) []byte {
-	return makeKey(makeKey([]byte(LKP_CHAIN_PATH_PREFIX), dirID), parentChainID)
+	return makeKey([]byte(LKP_CHAIN_PATH_PREFIX), dirID, parentChainID)
 }
 
 func splitPath(path string) []string {

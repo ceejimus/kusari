@@ -9,19 +9,14 @@ import (
 	"testing"
 	"time"
 
+	"atmoscape.net/fileserver/badgerstore"
 	"atmoscape.net/fileserver/fnode"
 	"atmoscape.net/fileserver/logger"
-	"atmoscape.net/fileserver/memstore"
 	"atmoscape.net/fileserver/syncd"
 	"atmoscape.net/fileserver/utils"
 	"github.com/stretchr/testify/assert"
 	"golang.org/x/sys/unix"
 )
-
-type ApiTestWrapper struct {
-	watcher *syncd.Watcher
-	store   syncd.EventStore
-}
 
 type Chain []syncd.Event                                 // a chain of events
 type Chains []Chain                                      // a slice of chains expected (given a final path)
@@ -721,10 +716,25 @@ func TestFileCopiedThenRemoved(t *testing.T) {
 }
 
 func runApiTest(t *testing.T, tmpFs *utils.TmpFs, actions []utils.FsAction, wantedMap DirPathToTailChainMap) {
-	wrapper := initApiTest(t, tmpFs)
-	watcher := wrapper.watcher
-	store := wrapper.store
+	var err error
+	if err := tmpFs.Instantiate(); err != nil {
+		t.Fatal(err)
+	}
+
 	defer tmpFs.Destroy()
+
+	// store := memstore.NewMemStore()
+	dbDir := filepath.Join(tmpFs.Path, "./.db/")
+	store, err := badgerstore.NewBadgerStore(dbDir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() {
+		store.Close()
+		os.RemoveAll(dbDir)
+	}()
+
+	watcher := initApiTest(t, tmpFs, store)
 
 	for i := range actions {
 		if actions[i].SrcPath != "" {
@@ -741,13 +751,7 @@ func runApiTest(t *testing.T, tmpFs *utils.TmpFs, actions []utils.FsAction, want
 	}
 }
 
-func initApiTest(t *testing.T, tmpFs *utils.TmpFs) ApiTestWrapper {
-	var err error
-	if err := tmpFs.Instantiate(); err != nil {
-		t.Fatal(err)
-	}
-
-	store := memstore.NewMemStore()
+func initApiTest(t *testing.T, tmpFs *utils.TmpFs, store syncd.EventStore) *syncd.Watcher {
 	managedDir := syncd.ManagedDirectory{Path: tmpFs.Dirs[0].Name}
 
 	if err := setupStoreFromLocalState(tmpFs, []syncd.ManagedDirectory{managedDir}, store); err != nil {
@@ -769,7 +773,7 @@ func initApiTest(t *testing.T, tmpFs *utils.TmpFs) ApiTestWrapper {
 
 	go syncd.RunWatcher(watcher)
 
-	return ApiTestWrapper{store: store, watcher: watcher}
+	return watcher
 }
 
 func takeActions(t *testing.T, actions []utils.FsAction, rx <-chan syncd.NodeEvent) {

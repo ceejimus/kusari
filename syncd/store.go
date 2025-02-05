@@ -59,7 +59,7 @@ type EventStore interface {
 	GetEventByID(id []byte) (*Event, bool)                   // get event by ID
 	GetDirs() []Dir                                          // get all stored dirs
 	GetChainsInDir(id []byte) ([]Chain, bool)                // get all chains in directory w/ ID
-	GetEventsInChain(id []byte) ([]Event, bool)              // get all events in chain w/ ID
+	GetEventsInChain(chainId []byte) ([]Event, bool)         // get all events in chain w/ ID
 	Close() error                                            // something for owners to call to cleanup underlying resources
 }
 

@@ -36,23 +36,39 @@ func setIDCounterFor(txn *badger.Txn, idBytes []byte, prefix []byte) error {
 	return txn.Set(append([]byte("counter:"), prefix...), idBytes)
 }
 
-func iterPrefix[T any](txn *badger.Txn, prefix []byte) ([][]byte, []T, error) {
+func iterObjects[T any](txn *badger.Txn, prefix []byte) ([][]byte, []T, error) {
+	ids, vals, err := iterVals(txn, prefix)
+	if err != nil {
+		return nil, nil, err
+	}
+	objs := make([]T, len(vals))
+	for i, val := range vals {
+		obj, err := parseValue[T](val)
+		if err != nil {
+			return nil, nil, err
+		}
+		objs[i] = *obj
+	}
+	return ids, objs, nil
+}
+
+func iterVals(txn *badger.Txn, prefix []byte) ([][]byte, [][]byte, error) {
 	ids := make([][]byte, 0)
-	objs := make([]T, 0)
+	vals := make([][]byte, 0)
 	it := txn.NewIterator(badger.DefaultIteratorOptions)
 	defer it.Close()
 	for it.Seek(prefix); it.ValidForPrefix(prefix); it.Next() {
 		item := it.Item()
 		key := item.Key()
-		id := key[len(prefix)+1:]
-		obj, err := parseItem[T](item)
+		id := key[len(prefix):]
+		val, err := copyValue(item)
 		if err != nil {
 			return nil, nil, err
 		}
 		ids = append(ids, id)
-		objs = append(objs, *obj)
+		vals = append(vals, val)
 	}
-	return ids, objs, nil
+	return ids, vals, nil
 }
 
 // get object from store by key

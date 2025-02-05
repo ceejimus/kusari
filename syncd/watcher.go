@@ -85,7 +85,7 @@ func InitWatcher(topDir string, managedDirs []ManagedDirectory, managedMap Manag
 	}
 
 	// add dirs to watcher
-	for i, dir := range store.GetDirs() {
+	for i, dir := range dirs {
 		// add this path to paths for directory lookups on node event
 		watcher.dirPaths[i] = dir.Path
 		// recursively add watcher to the directory and all sub-directories
