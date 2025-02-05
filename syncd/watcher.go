@@ -71,7 +71,11 @@ func InitWatcher(topDir string, managedDirs []ManagedDirectory, managedMap Manag
 	}
 
 	// get stored dirs
-	dirs := store.GetDirs()
+	dirs, err := store.GetDirs()
+
+	if err != nil {
+		return nil, err
+	}
 
 	// create watcher
 	tx, rx := utils.NewDroppingChannel[NodeEvent](1024)

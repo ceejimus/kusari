@@ -36,39 +36,35 @@ func setIDCounterFor(txn *badger.Txn, idBytes []byte, prefix []byte) error {
 	return txn.Set(append([]byte("counter:"), prefix...), idBytes)
 }
 
-func iterObjects[T any](txn *badger.Txn, prefix []byte) ([][]byte, []T, error) {
-	ids, vals, err := iterVals(txn, prefix)
+func iterObjects[T any](txn *badger.Txn, prefix []byte) ([]T, error) {
+	vals, err := iterVals(txn, prefix)
 	if err != nil {
-		return nil, nil, err
+		return nil, err
 	}
 	objs := make([]T, len(vals))
 	for i, val := range vals {
 		obj, err := parseValue[T](val)
 		if err != nil {
-			return nil, nil, err
+			return nil, err
 		}
 		objs[i] = *obj
 	}
-	return ids, objs, nil
+	return objs, nil
 }
 
-func iterVals(txn *badger.Txn, prefix []byte) ([][]byte, [][]byte, error) {
-	ids := make([][]byte, 0)
+func iterVals(txn *badger.Txn, prefix []byte) ([][]byte, error) {
 	vals := make([][]byte, 0)
 	it := txn.NewIterator(badger.DefaultIteratorOptions)
 	defer it.Close()
 	for it.Seek(prefix); it.ValidForPrefix(prefix); it.Next() {
 		item := it.Item()
-		key := item.Key()
-		id := key[len(prefix):]
 		val, err := copyValue(item)
 		if err != nil {
-			return nil, nil, err
+			return nil, err
 		}
-		ids = append(ids, id)
 		vals = append(vals, val)
 	}
-	return ids, vals, nil
+	return vals, nil
 }
 
 // get object from store by key
@@ -137,6 +133,23 @@ func addObject[T any](txn *badger.Txn, key []byte, obj T) error {
 		return err
 	}
 	return nil
+}
+
+func (s *BadgerStore) nextIDFor(prefix string) ([]byte, error) {
+	seq, ok := s.seqMap[prefix]
+	if !ok {
+		newSeq, err := s.db.GetSequence([]byte(prefix), 1000)
+		if err != nil {
+			return nil, err
+		}
+		s.seqMap[prefix] = newSeq
+		seq = newSeq
+	}
+	idInt, err := seq.Next()
+	if err != nil {
+		return nil, err
+	}
+	return uint64ToBytes(idInt), nil
 }
 
 func encode[T any](from T) ([]byte, error) {

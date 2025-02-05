@@ -84,11 +84,11 @@ type EventStore interface {
 	// should error if user specifies chainID of nonexistent Chain
 	AddEvent(event *Event, chainID []byte) error
 	// get syncd directory by ID
-	GetDirByID(id []byte) (*Dir, error)
+	GetDirByID(dirID []byte) (*Dir, error)
 	// get syncd dir by path
 	GetDirByPath(path string) (*Dir, error)
 	// get chain by ID
-	GetChainByID(id []byte) (*Chain, error)
+	GetChainByID(chainID []byte) (*Chain, error)
 	// get chain whose tail is event w/ path
 	// be careful implementing this one; it should return the chain whose most
 	// recent event was for an inode w/ the given path
@@ -105,11 +105,11 @@ type EventStore interface {
 	// until a new node re-uses the inode
 	GetChainByIno(ino uint64) (*Chain, error)
 	// get event by ID
-	GetEventByID(id []byte) (*Event, error)
+	GetEventByID(eventID []byte) (*Event, error)
 	// get all stored dirs
-	GetDirs() []Dir
+	GetDirs() ([]Dir, error)
 	// get all chains in directory
-	GetChainsInDir(id []byte) ([]Chain, error)
+	GetChainsInDir(dirID []byte) ([]Chain, error)
 	// get all events in chain
 	GetEventsInChain(chainId []byte) ([]Event, error)
 	// something for owners to call to cleanup underlying resources

@@ -846,7 +846,11 @@ func compareWanted(t *testing.T, wantedMap DirPathToTailChainMap, store syncd.Ev
 	gotDirs := make([]string, 0)
 	gotTailsMap := make(map[string][]string)
 
-	for _, d := range store.GetDirs() {
+	dirs, err := store.GetDirs()
+	if dirs == nil || err != nil {
+		return errors.New(fmt.Sprintln("Failed to get dirs"))
+	}
+	for _, d := range dirs {
 		dirChainMap := make(TailPathToChainMap)
 		gotMap[d.Path] = dirChainMap
 		gotDirs = append(gotDirs, d.Path)
