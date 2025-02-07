@@ -36,32 +36,43 @@ func (s *BadgerStore) AddDir(dir *syncd.Dir) error {
 		return err
 	}
 
-	dir.ID = badgerDir.ID
+	dir.ID = &badgerDir.ID
 	return nil
 }
 
-func (s *BadgerStore) AddChain(chain *syncd.Chain, dirID []byte) error {
+func (s *BadgerStore) AddChain(chain *syncd.Chain, dirID syncd.ID) error {
 	if chain.ID != nil {
 		return errors.New(fmt.Sprintf("Cannot add new chain, non-nil ID %v", chain))
 	}
 
-	badgerChain := BadgerChain{DirID: dirID, Ino: chain.Ino}
-	if err := addChain(s, &badgerChain, dirID); err != nil {
+	bdgID, err := toBadgerID(dirID)
+	if err != nil {
 		return err
 	}
 
-	chain.ID = badgerChain.ID
+	badgerChain := BadgerChain{DirID: bdgID, Ino: chain.Ino}
+	if err := addChain(s, &badgerChain, bdgID); err != nil {
+		return err
+	}
+
+	chain.ID = &badgerChain.ID
 	return nil
 }
 
-func (s *BadgerStore) AddEvent(event *syncd.Event, chainID []byte) error {
-	var id []byte
+func (s *BadgerStore) AddEvent(event *syncd.Event, chainID syncd.ID) error {
+	var id BadgerID
 	if event.ID != nil {
 		return errors.New(fmt.Sprintf("Cannot add new event, non-nil ID %v", event))
 	}
+
+	bdgID, err := toBadgerID(chainID)
+	if err != nil {
+		return err
+	}
+
 	// add new event
 	badgerEvent := BadgerEvent{
-		ChainID:   chainID,
+		ChainID:   bdgID,
 		Type:      event.Type,
 		Timestamp: event.Timestamp,
 		Path:      event.Path,
@@ -71,18 +82,24 @@ func (s *BadgerStore) AddEvent(event *syncd.Event, chainID []byte) error {
 	if event.Hash != nil {
 		badgerEvent.Hash = *event.Hash
 	}
-	if err := addEvent(s, &badgerEvent, chainID); err != nil {
+	if err := addEvent(s, &badgerEvent, bdgID); err != nil {
 		return err
 	}
 	// set ID
-	event.ID = id
+	event.ID = &id
 	return nil
 }
 
-func (s *BadgerStore) GetDirByID(id []byte) (*syncd.Dir, error) {
+func (s *BadgerStore) GetDirByID(dirID syncd.ID) (*syncd.Dir, error) {
 	var dir *syncd.Dir
+
+	bdgID, err := toBadgerID(dirID)
+	if err != nil {
+		return nil, err
+	}
+
 	if err := s.db.View(func(txn *badger.Txn) error {
-		bdgDir, err := getDirByID(txn, id)
+		bdgDir, err := getDirByID(txn, bdgID)
 		if bdgDir == nil || err != nil {
 			return err
 		}
@@ -111,10 +128,14 @@ func (s *BadgerStore) GetDirByPath(path string) (*syncd.Dir, error) {
 	return dir, nil
 }
 
-func (s *BadgerStore) GetChainByID(id []byte) (*syncd.Chain, error) {
+func (s *BadgerStore) GetChainByID(chainID syncd.ID) (*syncd.Chain, error) {
 	var chain *syncd.Chain
+	bdgID, err := toBadgerID(chainID)
+	if err != nil {
+		return nil, err
+	}
 	if err := s.db.View(func(txn *badger.Txn) error {
-		bdgChain, err := getChainByID(txn, id)
+		bdgChain, err := getChainByID(txn, bdgID)
 		if err != nil {
 			return err
 		}
@@ -127,10 +148,14 @@ func (s *BadgerStore) GetChainByID(id []byte) (*syncd.Chain, error) {
 	return chain, nil
 }
 
-func (s *BadgerStore) GetChainByPath(dirID []byte, path string) (*syncd.Chain, error) {
+func (s *BadgerStore) GetChainByPath(dirID syncd.ID, path string) (*syncd.Chain, error) {
 	var chain *syncd.Chain
+	bdgID, err := toBadgerID(dirID)
+	if err != nil {
+		return nil, err
+	}
 	if err := s.db.View(func(txn *badger.Txn) error {
-		chainID, err := getChainIDByPath(txn, dirID, path)
+		chainID, err := getChainIDByPath(txn, bdgID, path)
 		if err != nil {
 			return nil
 		}
@@ -163,7 +188,7 @@ func (s *BadgerStore) GetChainByIno(ino uint64) (*syncd.Chain, error) {
 	return chain, nil
 }
 
-func (s *BadgerStore) GetEventByID(id []byte) (*syncd.Event, error) {
+func (s *BadgerStore) GetEventByID(eventID syncd.ID) (*syncd.Event, error) {
 	panic("GetEventByID not implemented")
 }
 
@@ -186,19 +211,30 @@ func (s *BadgerStore) GetDirs() ([]syncd.Dir, error) {
 	return dirs, nil
 }
 
-func (s *BadgerStore) GetChainsInDir(id []byte) ([]syncd.Chain, error) {
+func (s *BadgerStore) GetChainsInDir(dirID syncd.ID) ([]syncd.Chain, error) {
 	var bdgChains []BadgerChain
 	if err := s.db.View(func(txn *badger.Txn) error {
 		var ids [][]byte
 		var err error
-		prefix := append(makeKey([]byte(LKP_CHAIN_DIR), id), []byte(":")...)
+
+		bdgID, err := toBadgerID(dirID)
+		if err != nil {
+			return err
+		}
+
+		prefix := append(makeKey([]byte(LKP_CHAIN_DIR), bdgID.Encode()), []byte(":")...)
 		ids, err = iterVals(txn, prefix)
 		if err != nil {
 			return err
 		}
 		bdgChains = make([]BadgerChain, len(ids))
 		for i, id := range ids {
-			bdgChain, err := getChainByID(txn, id)
+			var chainID BadgerID
+			err := chainID.Decode(id)
+			if err != nil {
+				return err
+			}
+			bdgChain, err := getChainByID(txn, chainID)
 			if err != nil {
 				return err
 			}
@@ -217,10 +253,15 @@ func (s *BadgerStore) GetChainsInDir(id []byte) ([]syncd.Chain, error) {
 	return chains, nil
 }
 
-func (s *BadgerStore) GetEventsInChain(chainID []byte) ([]syncd.Event, error) {
+func (s *BadgerStore) GetEventsInChain(chainID syncd.ID) ([]syncd.Event, error) {
 	var bdgEvents []BadgerEvent
+	bdgID, err := toBadgerID(chainID)
+	if err != nil {
+		return nil, err
+	}
+
 	if err := s.db.View(func(txn *badger.Txn) error {
-		bdgEvent, err := getChainHead(txn, chainID)
+		bdgEvent, err := getChainHead(txn, bdgID)
 		if err != nil {
 			return err
 		}
@@ -256,14 +297,16 @@ func (s *BadgerStore) Close() error {
 
 func badgerDirToDir(bdgDir BadgerDir) syncd.Dir {
 	return syncd.Dir{
-		ID:   bdgDir.ID,
+		ID:   &bdgDir.ID,
 		Path: bdgDir.Path,
 	}
 }
 
 func badgerChainToChain(bdgChain BadgerChain) syncd.Chain {
+	id := new(BadgerID)
+	*id = bdgChain.ID
 	return syncd.Chain{
-		ID:  bdgChain.ID,
+		ID:  id,
 		Ino: bdgChain.Ino,
 	}
 }
@@ -273,8 +316,9 @@ func badgerEventToEvent(bdgEvent BadgerEvent) syncd.Event {
 	if bdgEvent.Hash != "" {
 		hash = &bdgEvent.Hash
 	}
+	id := *&bdgEvent.ID
 	return syncd.Event{
-		ID:        bdgEvent.ID,
+		ID:        &id,
 		Timestamp: bdgEvent.Timestamp,
 		Path:      bdgEvent.Path,
 		Type:      bdgEvent.Type,

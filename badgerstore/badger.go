@@ -24,20 +24,22 @@ const LKP_CHAIN_PATH_PREFIX = "lkp:chain:path"
 
 var SEQ_KEYS = []string{PFX_DIR, PFX_CHAIN, PFX_EVENT, LKP_CHAIN_DIR}
 
+type BadgerID []byte
+
 type BadgerDir struct {
-	ID   []byte // dirID
-	Path string // relative to configured top-level directory
+	ID   BadgerID // dirID
+	Path string   // relative to configured top-level directory
 }
 
 type BadgerChain struct {
-	ID    []byte // chainID
-	DirID []byte // the dir ID to which this chain belongs
-	Ino   uint64 // the ino of the syncd inode
+	ID    BadgerID // chainID
+	DirID BadgerID // the dir ID to which this chain belongs
+	Ino   uint64   // the ino of the syncd inode
 }
 
 type BadgerEvent struct {
-	ID        []byte          // eventID
-	ChainID   []byte          // the chain ID to which this event belongs
+	ID        BadgerID        // eventID
+	ChainID   BadgerID        // the chain ID to which this event belongs
 	Type      syncd.EventType // "create", "modify", "delete", "rename", etc.
 	Timestamp time.Time       // time event processed
 	Path      string          // relative path of file
@@ -51,6 +53,22 @@ type SeqMap map[string]*badger.Sequence
 type BadgerStore struct {
 	db     *badger.DB
 	seqMap SeqMap
+}
+
+func (id *BadgerID) Encode() []byte {
+	return []byte(*id)
+}
+
+func (id *BadgerID) Decode(bytes []byte) error {
+	decoded := BadgerID(bytes)
+	id = &decoded
+	return nil
+}
+
+func toBadgerID(id syncd.ID) (BadgerID, error) {
+	var bdgID BadgerID
+	err := bdgID.Decode(id.Encode())
+	return bdgID, err
 }
 
 func addDir(s *BadgerStore, bdgDir *BadgerDir) error {
@@ -69,11 +87,11 @@ func addDir(s *BadgerStore, bdgDir *BadgerDir) error {
 		if toAdd.ID, err = s.nextIDFor(PFX_DIR); err != nil {
 			return err
 		}
-		if err = addObject(txn, makeKey([]byte(PFX_DIR), toAdd.ID), toAdd); err != nil {
+		if err = addObject(txn, makeKey([]byte(PFX_DIR), toAdd.ID.Encode()), toAdd); err != nil {
 			return err
 		}
 		// add path to dir lkp
-		if err = txn.Set(makeKey([]byte(LKP_DIR_PATH), []byte(bdgDir.Path)), toAdd.ID); err != nil {
+		if err = txn.Set(makeKey([]byte(LKP_DIR_PATH), []byte(bdgDir.Path)), toAdd.ID.Encode()); err != nil {
 			return err
 		}
 		// set the new ID
@@ -82,7 +100,7 @@ func addDir(s *BadgerStore, bdgDir *BadgerDir) error {
 	})
 }
 
-func addChain(s *BadgerStore, bdgChain *BadgerChain, dirID []byte) error {
+func addChain(s *BadgerStore, bdgChain *BadgerChain, dirID BadgerID) error {
 	return s.db.Update(func(txn *badger.Txn) error {
 		// check dir exists
 		dir, err := getDirByID(txn, dirID)
@@ -97,11 +115,11 @@ func addChain(s *BadgerStore, bdgChain *BadgerChain, dirID []byte) error {
 		if toAdd.ID, err = s.nextIDFor(PFX_CHAIN); err != nil {
 			return err
 		}
-		if err = addObject(txn, makeKey([]byte(PFX_CHAIN), toAdd.ID), toAdd); err != nil {
+		if err = addObject(txn, makeKey([]byte(PFX_CHAIN), toAdd.ID.Encode()), toAdd); err != nil {
 			return err
 		}
 		// add chain to ino lkp
-		if err = txn.Set(makeKey([]byte(LKP_CHAIN_INO), uint64ToBytes(bdgChain.Ino)), toAdd.ID); err != nil {
+		if err = txn.Set(makeKey([]byte(LKP_CHAIN_INO), uint64ToBytes(bdgChain.Ino)), toAdd.ID.Encode()); err != nil {
 			return err
 		}
 		// add chain to dir lkp
@@ -110,7 +128,7 @@ func addChain(s *BadgerStore, bdgChain *BadgerChain, dirID []byte) error {
 			return err
 		}
 		// set lookup for chain in dir
-		if err = txn.Set(makeKey([]byte(LKP_CHAIN_DIR), dirID, lkpID), toAdd.ID); err != nil {
+		if err = txn.Set(makeKey([]byte(LKP_CHAIN_DIR), dirID.Encode(), lkpID.Encode()), toAdd.ID.Encode()); err != nil {
 			return err
 		}
 		// set new ID
@@ -119,7 +137,7 @@ func addChain(s *BadgerStore, bdgChain *BadgerChain, dirID []byte) error {
 	})
 }
 
-func addEvent(s *BadgerStore, bdgEvent *BadgerEvent, chainID []byte) error {
+func addEvent(s *BadgerStore, bdgEvent *BadgerEvent, chainID BadgerID) error {
 	return s.db.Update(func(txn *badger.Txn) error {
 		// check chain exists
 		chain, err := getChainByID(txn, chainID)
@@ -131,7 +149,7 @@ func addEvent(s *BadgerStore, bdgEvent *BadgerEvent, chainID []byte) error {
 		if toAdd.ID, err = s.nextIDFor(PFX_EVENT); err != nil {
 			return err
 		}
-		if err = addObject(txn, makeKey([]byte(PFX_EVENT), toAdd.ID), toAdd); err != nil {
+		if err = addObject(txn, makeKey([]byte(PFX_EVENT), toAdd.ID.Encode()), toAdd); err != nil {
 			return err
 		}
 		// get current head and tail for chain
@@ -139,7 +157,7 @@ func addEvent(s *BadgerStore, bdgEvent *BadgerEvent, chainID []byte) error {
 		if err != nil {
 			return nil
 		}
-		tailID, err := getValue(txn, makeKey([]byte(LKP_CHAIN_TAIL), chainID))
+		tailID, err := getID(txn, makeKey([]byte(LKP_CHAIN_TAIL), chainID.Encode()))
 		if err != nil {
 			return nil
 		}
@@ -167,8 +185,8 @@ func addEvent(s *BadgerStore, bdgEvent *BadgerEvent, chainID []byte) error {
 	})
 }
 
-func getChainHead(txn *badger.Txn, chainID []byte) (*BadgerEvent, error) {
-	headID, err := getValue(txn, makeKey([]byte(LKP_CHAIN_HEAD), chainID))
+func getChainHead(txn *badger.Txn, chainID BadgerID) (*BadgerEvent, error) {
+	headID, err := getID(txn, makeKey([]byte(LKP_CHAIN_HEAD), chainID.Encode()))
 	if err != nil {
 		return nil, err
 	}
@@ -182,16 +200,16 @@ func getChainHead(txn *badger.Txn, chainID []byte) (*BadgerEvent, error) {
 	return event, nil
 }
 
-func setChainHead(txn *badger.Txn, chainID []byte, headID []byte) error {
-	return txn.Set(makeKey([]byte(LKP_CHAIN_HEAD), chainID), headID)
+func setChainHead(txn *badger.Txn, chainID BadgerID, headID BadgerID) error {
+	return txn.Set(makeKey([]byte(LKP_CHAIN_HEAD), chainID.Encode()), headID.Encode())
 }
 
-func setChainTail(txn *badger.Txn, chainID []byte, tailID []byte) error {
-	return txn.Set(makeKey([]byte(LKP_CHAIN_TAIL), chainID), tailID)
+func setChainTail(txn *badger.Txn, chainID BadgerID, tailID BadgerID) error {
+	return txn.Set(makeKey([]byte(LKP_CHAIN_TAIL), chainID.Encode()), tailID.Encode())
 }
 
-func getEventNext(txn *badger.Txn, eventID []byte) (*BadgerEvent, error) {
-	nextID, err := getValue(txn, makeKey([]byte(LKP_EVENT_NEXT), eventID))
+func getEventNext(txn *badger.Txn, eventID BadgerID) (*BadgerEvent, error) {
+	nextID, err := getID(txn, makeKey([]byte(LKP_EVENT_NEXT), eventID.Encode()))
 	if err != nil {
 		return nil, err
 	}
@@ -205,18 +223,18 @@ func getEventNext(txn *badger.Txn, eventID []byte) (*BadgerEvent, error) {
 	return event, nil
 }
 
-func setEventNext(txn *badger.Txn, eventID []byte, nextID []byte) error {
-	return txn.Set(makeKey([]byte(LKP_EVENT_NEXT), eventID), nextID)
+func setEventNext(txn *badger.Txn, eventID BadgerID, nextID BadgerID) error {
+	return txn.Set(makeKey([]byte(LKP_EVENT_NEXT), eventID.Encode()), nextID.Encode())
 }
 
-func updateChainLkps(txn *badger.Txn, chainID []byte, event BadgerEvent, tailID []byte) error {
+func updateChainLkps(txn *badger.Txn, chainID BadgerID, event BadgerEvent, tailID BadgerID) error {
 	var tail *BadgerEvent
-	chain, err := getObject[BadgerChain](txn, makeKey([]byte(PFX_CHAIN), chainID))
+	chain, err := getObject[BadgerChain](txn, makeKey([]byte(PFX_CHAIN), chainID.Encode()))
 	if err != nil {
 		return err
 	}
 	if tailID != nil {
-		tail, err = getObject[BadgerEvent](txn, makeKey([]byte(PFX_EVENT), tailID))
+		tail, err = getObject[BadgerEvent](txn, makeKey([]byte(PFX_EVENT), tailID.Encode()))
 		if err != nil {
 			return err
 		}
@@ -250,24 +268,24 @@ func updateChainLkps(txn *badger.Txn, chainID []byte, event BadgerEvent, tailID 
 	return nil
 }
 
-func getDirByID(txn *badger.Txn, id []byte) (*BadgerDir, error) {
-	dir, err := getObject[BadgerDir](txn, makeKey([]byte(PFX_DIR), id))
+func getDirByID(txn *badger.Txn, dirID BadgerID) (*BadgerDir, error) {
+	dir, err := getObject[BadgerDir](txn, makeKey([]byte(PFX_DIR), dirID.Encode()))
 	if err != nil {
 		return nil, err
 	}
 	return dir, nil
 }
 
-func getChainByID(txn *badger.Txn, id []byte) (*BadgerChain, error) {
-	chain, err := getObject[BadgerChain](txn, makeKey([]byte(PFX_CHAIN), id))
+func getChainByID(txn *badger.Txn, chainID BadgerID) (*BadgerChain, error) {
+	chain, err := getObject[BadgerChain](txn, makeKey([]byte(PFX_CHAIN), chainID.Encode()))
 	if err != nil {
 		return nil, err
 	}
 	return chain, nil
 }
 
-func getEventByID(txn *badger.Txn, id []byte) (*BadgerEvent, error) {
-	event, err := getObject[BadgerEvent](txn, makeKey([]byte(PFX_EVENT), id))
+func getEventByID(txn *badger.Txn, eventID BadgerID) (*BadgerEvent, error) {
+	event, err := getObject[BadgerEvent](txn, makeKey([]byte(PFX_EVENT), eventID.Encode()))
 	if err != nil {
 		return nil, err
 	}
@@ -275,7 +293,7 @@ func getEventByID(txn *badger.Txn, id []byte) (*BadgerEvent, error) {
 }
 
 func getDirByPath(txn *badger.Txn, path string) (*BadgerDir, error) {
-	dirID, err := getValue(txn, makeKey([]byte(LKP_DIR_PATH), []byte(path)))
+	dirID, err := getID(txn, makeKey([]byte(LKP_DIR_PATH), []byte(path)))
 	if dirID == nil || err != nil {
 		return nil, err
 	}
@@ -283,7 +301,7 @@ func getDirByPath(txn *badger.Txn, path string) (*BadgerDir, error) {
 }
 
 func getChainByIno(txn *badger.Txn, ino uint64) (*BadgerChain, error) {
-	chainID, err := getValue(txn, makeKey([]byte(LKP_CHAIN_INO), uint64ToBytes(ino)))
+	chainID, err := getID(txn, makeKey([]byte(LKP_CHAIN_INO), uint64ToBytes(ino)))
 	if chainID == nil || err != nil {
 		return nil, err
 	}

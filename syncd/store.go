@@ -34,21 +34,25 @@ const (
 	Chmod
 )
 
+type ID interface {
+	Encode() []byte // encode ID to bytes
+}
+
 // top-level directory
 type Dir struct {
-	ID   []byte // should be generated when adding
+	ID   ID     // should be generated when adding
 	Path string // relative to configured top-level directory
 }
 
 // chain of events for a given inode
 type Chain struct {
-	ID  []byte // should be generated when adding
+	ID  ID     // should be generated when adding
 	Ino uint64 // the local inode
 }
 
 // something that happened to a node
 type Event struct {
-	ID        []byte    // should be generated when adding
+	ID        ID        // should be generated when adding
 	Timestamp time.Time // timestamp of the event
 	Path      string    // relative to DirName
 	Type      EventType // create, remove, rename, write, chmod
@@ -79,16 +83,16 @@ type EventStore interface {
 	AddDir(dir *Dir) error
 	// add a new event chain
 	// should error if user specifies dirID of nonexistent Dir
-	AddChain(chain *Chain, dirID []byte) error
+	AddChain(chain *Chain, dirID ID) error
 	// add a new event
 	// should error if user specifies chainID of nonexistent Chain
-	AddEvent(event *Event, chainID []byte) error
+	AddEvent(event *Event, chainID ID) error
 	// get syncd directory by ID
-	GetDirByID(dirID []byte) (*Dir, error)
+	GetDirByID(dirID ID) (*Dir, error)
 	// get syncd dir by path
 	GetDirByPath(path string) (*Dir, error)
 	// get chain by ID
-	GetChainByID(chainID []byte) (*Chain, error)
+	GetChainByID(chainID ID) (*Chain, error)
 	// get chain whose tail is event w/ path
 	// be careful implementing this one; it should return the chain whose most
 	// recent event was for an inode w/ the given path
@@ -99,19 +103,19 @@ type EventStore interface {
 	//
 	// NOTE: after a node is removed, this should return nil
 	// until a new node re-uses the name
-	GetChainByPath(dirID []byte, path string) (*Chain, error)
+	GetChainByPath(dirID ID, path string) (*Chain, error)
 	// get chain by ino
 	// like the above, after a node is removed, this should return nil
 	// until a new node re-uses the inode
 	GetChainByIno(ino uint64) (*Chain, error)
 	// get event by ID
-	GetEventByID(eventID []byte) (*Event, error)
+	GetEventByID(eventID ID) (*Event, error)
 	// get all stored dirs
 	GetDirs() ([]Dir, error)
 	// get all chains in directory
-	GetChainsInDir(dirID []byte) ([]Chain, error)
+	GetChainsInDir(dirID ID) ([]Chain, error)
 	// get all events in chain
-	GetEventsInChain(chainId []byte) ([]Event, error)
+	GetEventsInChain(chainId ID) ([]Event, error)
 	// something for owners to call to cleanup underlying resources
 	Close() error
 }

@@ -32,10 +32,6 @@ func getNextIDFor(txn *badger.Txn, prefix []byte) ([]byte, error) {
 	return uint64ToBytes(nextID), err
 }
 
-func setIDCounterFor(txn *badger.Txn, idBytes []byte, prefix []byte) error {
-	return txn.Set(append([]byte("counter:"), prefix...), idBytes)
-}
-
 func iterObjects[T any](txn *badger.Txn, prefix []byte) ([]T, error) {
 	vals, err := iterVals(txn, prefix)
 	if err != nil {
@@ -135,7 +131,7 @@ func addObject[T any](txn *badger.Txn, key []byte, obj T) error {
 	return nil
 }
 
-func (s *BadgerStore) nextIDFor(prefix string) ([]byte, error) {
+func (s *BadgerStore) nextIDFor(prefix string) (BadgerID, error) {
 	seq, ok := s.seqMap[prefix]
 	if !ok {
 		newSeq, err := s.db.GetSequence([]byte(prefix), 1000)
@@ -145,11 +141,14 @@ func (s *BadgerStore) nextIDFor(prefix string) ([]byte, error) {
 		s.seqMap[prefix] = newSeq
 		seq = newSeq
 	}
-	idInt, err := seq.Next()
+	id, err := seq.Next()
+	for id < 1 && err == nil {
+		id, err = seq.Next()
+	}
 	if err != nil {
 		return nil, err
 	}
-	return uint64ToBytes(idInt), nil
+	return BadgerID(uint64ToBytes(id)), nil
 }
 
 func encode[T any](from T) ([]byte, error) {
@@ -164,6 +163,16 @@ func decode[T any](from []byte) (T, error) {
 	d := gob.NewDecoder(bytes.NewReader(from))
 	err := d.Decode(&decoded)
 	return decoded, err
+}
+
+func getID(txn *badger.Txn, key []byte) (BadgerID, error) {
+	bytes, err := getValue(txn, key)
+	if err != nil {
+		return nil, err
+	}
+	var id BadgerID
+	err = id.Decode(bytes)
+	return id, err
 }
 
 func uint64ToBytes(id uint64) []byte {
