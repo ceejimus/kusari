@@ -170,9 +170,10 @@ func getID(txn *badger.Txn, key []byte) (BadgerID, error) {
 	if err != nil {
 		return nil, err
 	}
-	var id BadgerID
-	err = id.Decode(bytes)
-	return id, err
+	if bytes == nil {
+		return nil, nil
+	}
+	return toBadgerID(bytes)
 }
 
 func uint64ToBytes(id uint64) []byte {

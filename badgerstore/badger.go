@@ -59,16 +59,14 @@ func (id *BadgerID) Encode() []byte {
 	return []byte(*id)
 }
 
-func (id *BadgerID) Decode(bytes []byte) error {
-	decoded := BadgerID(bytes)
-	id = &decoded
-	return nil
-}
-
-func toBadgerID(id syncd.ID) (BadgerID, error) {
-	var bdgID BadgerID
-	err := bdgID.Decode(id.Encode())
-	return bdgID, err
+func toBadgerID(bytes []byte) (BadgerID, error) {
+	if len(bytes) != 8 {
+		return nil, errors.New(fmt.Sprintf("Failed to convert ID bytes to BadgerID, bytes must represent uint64: %v", bytes))
+	}
+	if *(*[8]byte)(bytes) == [8]byte{} {
+		return nil, errors.New(fmt.Sprintln("Failed to convert ID bytes to BadgerID, ID must be greater than 0"))
+	}
+	return BadgerID(bytes), nil
 }
 
 func addDir(s *BadgerStore, bdgDir *BadgerDir) error {

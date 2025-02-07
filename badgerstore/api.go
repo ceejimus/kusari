@@ -45,7 +45,7 @@ func (s *BadgerStore) AddChain(chain *syncd.Chain, dirID syncd.ID) error {
 		return errors.New(fmt.Sprintf("Cannot add new chain, non-nil ID %v", chain))
 	}
 
-	bdgID, err := toBadgerID(dirID)
+	bdgID, err := toBadgerID(dirID.Encode())
 	if err != nil {
 		return err
 	}
@@ -65,7 +65,7 @@ func (s *BadgerStore) AddEvent(event *syncd.Event, chainID syncd.ID) error {
 		return errors.New(fmt.Sprintf("Cannot add new event, non-nil ID %v", event))
 	}
 
-	bdgID, err := toBadgerID(chainID)
+	bdgID, err := toBadgerID(chainID.Encode())
 	if err != nil {
 		return err
 	}
@@ -93,7 +93,7 @@ func (s *BadgerStore) AddEvent(event *syncd.Event, chainID syncd.ID) error {
 func (s *BadgerStore) GetDirByID(dirID syncd.ID) (*syncd.Dir, error) {
 	var dir *syncd.Dir
 
-	bdgID, err := toBadgerID(dirID)
+	bdgID, err := toBadgerID(dirID.Encode())
 	if err != nil {
 		return nil, err
 	}
@@ -130,7 +130,7 @@ func (s *BadgerStore) GetDirByPath(path string) (*syncd.Dir, error) {
 
 func (s *BadgerStore) GetChainByID(chainID syncd.ID) (*syncd.Chain, error) {
 	var chain *syncd.Chain
-	bdgID, err := toBadgerID(chainID)
+	bdgID, err := toBadgerID(chainID.Encode())
 	if err != nil {
 		return nil, err
 	}
@@ -150,7 +150,7 @@ func (s *BadgerStore) GetChainByID(chainID syncd.ID) (*syncd.Chain, error) {
 
 func (s *BadgerStore) GetChainByPath(dirID syncd.ID, path string) (*syncd.Chain, error) {
 	var chain *syncd.Chain
-	bdgID, err := toBadgerID(dirID)
+	bdgID, err := toBadgerID(dirID.Encode())
 	if err != nil {
 		return nil, err
 	}
@@ -217,7 +217,7 @@ func (s *BadgerStore) GetChainsInDir(dirID syncd.ID) ([]syncd.Chain, error) {
 		var ids [][]byte
 		var err error
 
-		bdgID, err := toBadgerID(dirID)
+		bdgID, err := toBadgerID(dirID.Encode())
 		if err != nil {
 			return err
 		}
@@ -229,8 +229,7 @@ func (s *BadgerStore) GetChainsInDir(dirID syncd.ID) ([]syncd.Chain, error) {
 		}
 		bdgChains = make([]BadgerChain, len(ids))
 		for i, id := range ids {
-			var chainID BadgerID
-			err := chainID.Decode(id)
+			chainID, err := toBadgerID(id)
 			if err != nil {
 				return err
 			}
@@ -255,7 +254,7 @@ func (s *BadgerStore) GetChainsInDir(dirID syncd.ID) ([]syncd.Chain, error) {
 
 func (s *BadgerStore) GetEventsInChain(chainID syncd.ID) ([]syncd.Event, error) {
 	var bdgEvents []BadgerEvent
-	bdgID, err := toBadgerID(chainID)
+	bdgID, err := toBadgerID(chainID.Encode())
 	if err != nil {
 		return nil, err
 	}
