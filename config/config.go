@@ -6,7 +6,7 @@ import (
 	"os"
 	"path/filepath"
 
-	"atmoscape.net/fileserver/syncd"
+	"github.com/ceejimus/kusari/syncd"
 	"gopkg.in/yaml.v3"
 )
 

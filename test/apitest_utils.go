@@ -8,11 +8,11 @@ import (
 	"testing"
 	"time"
 
-	"atmoscape.net/fileserver/badgerstore"
-	"atmoscape.net/fileserver/fnode"
-	"atmoscape.net/fileserver/logger"
-	"atmoscape.net/fileserver/syncd"
-	"atmoscape.net/fileserver/utils"
+	"github.com/ceejimus/kusari/badgerstore"
+	"github.com/ceejimus/kusari/fnode"
+	"github.com/ceejimus/kusari/logger"
+	"github.com/ceejimus/kusari/syncd"
+	"github.com/ceejimus/kusari/utils"
 	"github.com/stretchr/testify/assert"
 )
 

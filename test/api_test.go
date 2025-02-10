@@ -6,10 +6,10 @@ import (
 	"os"
 	"testing"
 
-	"atmoscape.net/fileserver/fnode"
-	"atmoscape.net/fileserver/logger"
-	"atmoscape.net/fileserver/syncd"
-	"atmoscape.net/fileserver/utils"
+	"github.com/ceejimus/kusari/fnode"
+	"github.com/ceejimus/kusari/logger"
+	"github.com/ceejimus/kusari/syncd"
+	"github.com/ceejimus/kusari/utils"
 	"golang.org/x/sys/unix"
 )
 

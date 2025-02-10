@@ -7,8 +7,8 @@ import (
 	"path/filepath"
 	"strings"
 
-	"atmoscape.net/fileserver/fnode"
-	"atmoscape.net/fileserver/logger"
+	"github.com/ceejimus/kusari/fnode"
+	"github.com/ceejimus/kusari/logger"
 	"github.com/gobwas/glob"
 )
 

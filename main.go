@@ -4,10 +4,8 @@ import (
 	"fmt"
 	"os"
 
-	"atmoscape.net/fileserver/badgerstore"
-	"atmoscape.net/fileserver/config"
-	"atmoscape.net/fileserver/logger"
-	"atmoscape.net/fileserver/syncd"
+	"github.com/ceejimus/kusari/config"
+	"github.com/ceejimus/kusari/logger"
 )
 
 const CONFIG_YAML_PATH = "./.data/cnf.yaml"
@@ -28,22 +26,4 @@ func main() {
 	logger.Init(config.LogLevel)
 
 	logger.Info(fmt.Sprintf("Running w/ config:%v\n", config))
-	dbDir := "./.data/db/"
-	dir := syncd.Dir{Path: "d"}
-	badgerStore, err := badgerstore.NewBadgerStore(dbDir)
-	if err != nil {
-		logger.Error(err.Error())
-		os.Exit(1)
-	}
-	if err = badgerStore.AddDir(&dir); err != nil {
-		logger.Error(err.Error())
-		os.Exit(1)
-	}
-	logger.Debug(fmt.Sprintf("New Dir: %+v", dir))
-	gotDir, err := badgerStore.GetDirByID(dir.ID)
-	if gotDir == nil || err != nil {
-		logger.Error("couldn't get dir")
-		os.Exit(1)
-	}
-	logger.Debug(fmt.Sprintf("Got Dir: %+v", gotDir))
 }

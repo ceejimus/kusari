@@ -4,8 +4,8 @@ import (
 	"path/filepath"
 	"testing"
 
-	"atmoscape.net/fileserver/fnode"
-	"atmoscape.net/fileserver/utils"
+	"github.com/ceejimus/kusari/fnode"
+	"github.com/ceejimus/kusari/utils"
 	"github.com/stretchr/testify/assert"
 )
 

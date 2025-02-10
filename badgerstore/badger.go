@@ -5,7 +5,7 @@ import (
 	"fmt"
 	"time"
 
-	"atmoscape.net/fileserver/syncd"
+	"github.com/ceejimus/kusari/syncd"
 	badger "github.com/dgraph-io/badger/v4"
 )
 
@@ -170,9 +170,6 @@ func addEvent(s *BadgerStore, bdgEvent *BadgerEvent, chainID BadgerID) error {
 			if err = setEventNext(txn, tail.ID, toAdd.ID); err != nil {
 				return err
 			}
-		}
-		if toAdd.Path == "s2/s4/s3/a" {
-			fmt.Sprintf("debug")
 		}
 		// update the path lookup depending on event type
 		if err = updateChainLkps(txn, chainID, &toAdd, tail); err != nil {

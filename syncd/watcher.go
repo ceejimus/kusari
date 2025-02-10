@@ -11,9 +11,9 @@ import (
 	"sync/atomic"
 	"time"
 
-	"atmoscape.net/fileserver/fnode"
-	"atmoscape.net/fileserver/logger"
-	"atmoscape.net/fileserver/utils"
+	"github.com/ceejimus/kusari/fnode"
+	"github.com/ceejimus/kusari/logger"
+	"github.com/ceejimus/kusari/utils"
 	"github.com/fsnotify/fsnotify"
 )
 

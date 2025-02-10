@@ -4,7 +4,7 @@ import (
 	"errors"
 	"fmt"
 
-	"atmoscape.net/fileserver/syncd"
+	"github.com/ceejimus/kusari/syncd"
 	badger "github.com/dgraph-io/badger/v4"
 )
 

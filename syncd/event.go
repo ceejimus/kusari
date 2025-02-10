@@ -6,8 +6,8 @@ import (
 	"os"
 	"time"
 
-	"atmoscape.net/fileserver/fnode"
-	"atmoscape.net/fileserver/logger"
+	"github.com/ceejimus/kusari/fnode"
+	"github.com/ceejimus/kusari/logger"
 	"github.com/fsnotify/fsnotify"
 )
 

@@ -6,7 +6,7 @@ import (
 	"path/filepath"
 	"testing"
 
-	"atmoscape.net/fileserver/logger"
+	"github.com/ceejimus/kusari/logger"
 	"github.com/stretchr/testify/assert"
 )
 
