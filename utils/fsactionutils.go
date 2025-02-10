@@ -22,31 +22,45 @@ const (
 )
 
 type FsAction struct {
-	Kind    ActionKind
-	Content []byte
-	SrcPath string
-	DstPath string
+	Kind     ActionKind
+	Content  []byte
+	SrcPath  string
+	DstPath  string
+	WaitTime *time.Duration
 }
 
 func (a *FsAction) Take() error {
+	var err error
 	switch a.Kind {
 	case TOUCH:
-		return touchFile(a.DstPath)
+		err = touchFile(a.DstPath)
 	case WRITE:
-		return writeFile(a.DstPath, a.Content)
+		err = writeFile(a.DstPath, a.Content)
 	case COPY:
-		return copyFile(a.DstPath, a.SrcPath)
+		err = copyFile(a.DstPath, a.SrcPath)
 	case MOVE:
-		return moveNode(a.DstPath, a.SrcPath)
+		err = moveNode(a.DstPath, a.SrcPath)
 	case REMOVE:
-		return removeFile(a.DstPath)
+		err = removeFile(a.DstPath)
 	case MKDIR:
-		return mkDir(a.DstPath)
+		err = mkDir(a.DstPath)
 	case RMDIR:
-		return rmDir(a.DstPath)
+		err = rmDir(a.DstPath)
+	default:
+		return errors.New(fmt.Sprintf("unexpected utils.ActionKind: %#v", a.Kind))
 	}
 
-	return errors.New(fmt.Sprintf("unexpected utils.ActionKind: %#v", a.Kind))
+	if err != nil {
+		return err
+	}
+
+	waitTime := 50 * time.Millisecond
+	if a.WaitTime != nil {
+		waitTime = *a.WaitTime
+	}
+	time.Sleep(waitTime)
+
+	return nil
 }
 
 // thanks https://golangbyexample.com/touch-file-golang/

@@ -19,6 +19,7 @@ const LKP_CHAIN_DIR = "lkp:chain:dir"
 const PFX_EVENT = "event"
 const LKP_CHAIN_HEAD = "lkp:event:head"
 const LKP_CHAIN_TAIL = "lkp:event:tail"
+const LKP_EVENT_PREV = "lkp:event:prev"
 const LKP_EVENT_NEXT = "lkp:event:next"
 const LKP_CHAIN_PATH_PREFIX = "lkp:chain:path"
 
@@ -43,6 +44,7 @@ type BadgerEvent struct {
 	Type      syncd.EventType // "create", "modify", "delete", "rename", etc.
 	Timestamp time.Time       // time event processed
 	Path      string          // relative path of file
+	OldPath   string          // the old path (for create events after rename)
 	ModTime   time.Time       // modification time
 	Hash      string          // file hash (if file)
 	Size      uint64          // file size
@@ -155,7 +157,7 @@ func addEvent(s *BadgerStore, bdgEvent *BadgerEvent, chainID BadgerID) error {
 		if err != nil {
 			return nil
 		}
-		tailID, err := getID(txn, makeKey([]byte(LKP_CHAIN_TAIL), chainID.Encode()))
+		tail, err := getChainTail(txn, chainID)
 		if err != nil {
 			return nil
 		}
@@ -165,12 +167,15 @@ func addEvent(s *BadgerStore, bdgEvent *BadgerEvent, chainID BadgerID) error {
 				return err
 			}
 		} else {
-			if err = setEventNext(txn, tailID, toAdd.ID); err != nil {
+			if err = setEventNext(txn, tail.ID, toAdd.ID); err != nil {
 				return err
 			}
 		}
+		if toAdd.Path == "s2/s4/s3/a" {
+			fmt.Sprintf("debug")
+		}
 		// update the path lookup depending on event type
-		if err = updateChainLkps(txn, chainID, toAdd, tailID); err != nil {
+		if err = updateChainLkps(txn, chainID, &toAdd, tail); err != nil {
 			return err
 		}
 		// set the tail
@@ -179,6 +184,7 @@ func addEvent(s *BadgerStore, bdgEvent *BadgerEvent, chainID BadgerID) error {
 		}
 		// set the ID
 		bdgEvent.ID = toAdd.ID
+		bdgEvent.OldPath = toAdd.OldPath
 		return nil
 	})
 }
@@ -192,6 +198,21 @@ func getChainHead(txn *badger.Txn, chainID BadgerID) (*BadgerEvent, error) {
 		return nil, nil
 	}
 	event, err := getEventByID(txn, headID)
+	if err != nil {
+		return nil, err
+	}
+	return event, nil
+}
+
+func getChainTail(txn *badger.Txn, chainID BadgerID) (*BadgerEvent, error) {
+	tailID, err := getID(txn, makeKey([]byte(LKP_CHAIN_TAIL), chainID.Encode()))
+	if err != nil {
+		return nil, err
+	}
+	if tailID == nil {
+		return nil, nil
+	}
+	event, err := getEventByID(txn, tailID)
 	if err != nil {
 		return nil, err
 	}
@@ -225,22 +246,14 @@ func setEventNext(txn *badger.Txn, eventID BadgerID, nextID BadgerID) error {
 	return txn.Set(makeKey([]byte(LKP_EVENT_NEXT), eventID.Encode()), nextID.Encode())
 }
 
-func updateChainLkps(txn *badger.Txn, chainID BadgerID, event BadgerEvent, tailID BadgerID) error {
-	var tail *BadgerEvent
+func updateChainLkps(txn *badger.Txn, chainID BadgerID, event *BadgerEvent, tail *BadgerEvent) error {
 	chain, err := getObject[BadgerChain](txn, makeKey([]byte(PFX_CHAIN), chainID.Encode()))
 	if err != nil {
 		return err
 	}
-	if tailID != nil {
-		tail, err = getObject[BadgerEvent](txn, makeKey([]byte(PFX_EVENT), tailID.Encode()))
-		if err != nil {
-			return err
-		}
-		if tail == nil {
-			return errors.New(fmt.Sprintf("Failed to update chain links, non existent tail w/ ID: %s", tailID))
-		}
-	}
 	if event.Type == syncd.Create && tail != nil && tail.Type == syncd.Rename {
+		// set old path for move finalizations
+		event.OldPath = tail.Path
 		if err := moveChainPathLkp(txn, chain.DirID, event.Path, tail.Path); err != nil {
 			return err
 		}
@@ -283,6 +296,14 @@ func getChainByID(txn *badger.Txn, chainID BadgerID) (*BadgerChain, error) {
 }
 
 func getEventByID(txn *badger.Txn, eventID BadgerID) (*BadgerEvent, error) {
+	event, err := getObject[BadgerEvent](txn, makeKey([]byte(PFX_EVENT), eventID.Encode()))
+	if err != nil {
+		return nil, err
+	}
+	return event, nil
+}
+
+func getPrevEvent(txn *badger.Txn, eventID BadgerID) (*BadgerEvent, error) {
 	event, err := getObject[BadgerEvent](txn, makeKey([]byte(PFX_EVENT), eventID.Encode()))
 	if err != nil {
 		return nil, err

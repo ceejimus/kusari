@@ -1,5 +1,18 @@
 package utils
 
+import "sync"
+
+type SafeFlag struct {
+	mu  sync.Mutex
+	set bool
+}
+
+func (f *SafeFlag) Set() {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.set = true
+}
+
 // this creates a rx/tx channel pair
 // if the outbound channel is at capacity when new messages are received
 // older messages will be thrown away to make room

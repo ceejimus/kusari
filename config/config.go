@@ -11,10 +11,10 @@ import (
 )
 
 type NodeConfig struct {
-	DSN                string                   `yaml:"dsn"`
-	LogLevel           string                   `yaml:"logLevel"`
-	TopDir             string                   `yaml:"topDir"`
-	ManagedDirectories []syncd.ManagedDirectory `yaml:"dirs"`
+	DSN              string                 `yaml:"dsn"`
+	LogLevel         string                 `yaml:"logLevel"`
+	TopDir           string                 `yaml:"topDir"`
+	SyncdDirectories []syncd.SyncdDirectory `yaml:"dirs"`
 }
 
 func LoadConfig(filename string) (*NodeConfig, error) {
@@ -30,8 +30,8 @@ func LoadConfig(filename string) (*NodeConfig, error) {
 	}
 
 	config.TopDir = filepath.Clean(config.TopDir)
-	for i := range config.ManagedDirectories {
-		config.ManagedDirectories[i].Path = filepath.Clean(config.ManagedDirectories[i].Path)
+	for i := range config.SyncdDirectories {
+		config.SyncdDirectories[i].Path = filepath.Clean(config.SyncdDirectories[i].Path)
 	}
 
 	return &config, nil
@@ -43,11 +43,11 @@ func (cnf *NodeConfig) Validate() error {
 		return errors.New(fmt.Sprintf("Invalid TopDir - %s", err.Error()))
 	}
 
-	for _, dir := range cnf.ManagedDirectories {
+	for _, dir := range cnf.SyncdDirectories {
 		fullPath := filepath.Join(cnf.TopDir, dir.Path)
 		err := checkDir(fullPath)
 		if err != nil {
-			return errors.New(fmt.Sprintf("Invalid ManagedDirectory path - %s", err.Error()))
+			return errors.New(fmt.Sprintf("Invalid SyncdDirectory path - %s", err.Error()))
 		}
 	}
 

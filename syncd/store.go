@@ -55,6 +55,7 @@ type Event struct {
 	ID        ID        // should be generated when adding
 	Timestamp time.Time // timestamp of the event
 	Path      string    // relative to DirName
+	OldPath   *string   // this is set for create events that finalize a move (rename)
 	Type      EventType // create, remove, rename, write, chmod
 	Size      uint64    // file size
 	Hash      *string   // file hash (null for non-files)
@@ -110,6 +111,10 @@ type EventStore interface {
 	GetChainByIno(ino uint64) (*Chain, error)
 	// get event by ID
 	GetEventByID(eventID ID) (*Event, error)
+	// get the event that occurred before this event
+	GetPrevEvent(eventID ID) (*Event, error)
+	// get the event that occurred after this event
+	GetNextEvent(eventID ID) (*Event, error)
 	// get all stored dirs
 	GetDirs() ([]Dir, error)
 	// get all chains in directory

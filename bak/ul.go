@@ -13,7 +13,7 @@ import (
 )
 
 type NodeConfig struct {
-	ManagedDirectories []struct {
+	WatchedDirectories []struct {
 		Path    string   `yaml:"path"`
 		Include []string `yaml:"incl"`
 		Exclude []string `yaml:"excl"`

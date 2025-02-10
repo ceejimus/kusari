@@ -27,13 +27,14 @@ type NodeState struct {
 }
 
 type Node struct {
-	info fs.FileInfo
+	Info fs.FileInfo
+	Ino  uint64
 	Path string
 }
 
 func (n *Node) Type() NodeType {
 	// extract type from info and set on type
-	mode := n.info.Mode()
+	mode := n.Info.Mode()
 	if mode.IsRegular() {
 		return FILE
 	} else if mode.IsDir() {
@@ -42,21 +43,12 @@ func (n *Node) Type() NodeType {
 	return -1
 }
 
-func (n *Node) Ino() uint64 {
-	// extract inode from stat
-	stat, ok := n.info.Sys().(*syscall.Stat_t)
-	if ok {
-		return stat.Ino
-	}
-	return 0
-}
-
 func (n *Node) Size() uint64 {
-	return uint64(n.info.Size())
+	return uint64(n.Info.Size())
 }
 
 func (n *Node) ModTime() time.Time {
-	return n.info.ModTime()
+	return n.Info.ModTime()
 }
 
 func (n *Node) Hash() (*string, error) {
@@ -90,13 +82,13 @@ func (n Node) String() string {
 	} else if n.Type() == DIR {
 		nodeTypeStr = "d"
 	}
-	b.WriteString(fmt.Sprintf("(%.8d) ", n.Ino()))
+	b.WriteString(fmt.Sprintf("(%.8d) ", n.Ino))
 	b.WriteString(fmt.Sprintf("%v ", nodeTypeStr))
 	b.WriteString(fmt.Sprintf("%.8d", n.Size()))
 	//	01/02 03:04:05PM '06 -0700
 	//	Mon Jan 2 15:04:05 MST 2006
 	b.WriteString(fmt.Sprintf(" %s", n.ModTime().Format("2006-01-02 15:04:05 MST")))
-	b.WriteString(fmt.Sprintf(" %s", n.info.Name()))
+	b.WriteString(fmt.Sprintf(" %s", n.Info.Name()))
 	hash, err := n.Hash()
 	if err == nil {
 		b.WriteString(fmt.Sprintf(" |%s|", *hash))
@@ -122,6 +114,16 @@ func NewNode(path string) (*Node, error) {
 	if err != nil {
 		return nil, err
 	}
+	return NewNodeFromInfo(path, info)
+}
 
-	return &Node{info: info, Path: path}, nil
+func NewNodeFromInfo(path string, info os.FileInfo) (*Node, error) {
+	// extract inode from stat
+	stat, ok := info.Sys().(*syscall.Stat_t)
+	if !ok {
+		return nil, errors.New(fmt.Sprintf("Failed to extract Ino from node: %q", path))
+	}
+
+	return &Node{Info: info, Ino: stat.Ino, Path: path}, nil
+
 }

@@ -7,6 +7,8 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
+	"sync/atomic"
 	"time"
 
 	"atmoscape.net/fileserver/fnode"
@@ -16,41 +18,15 @@ import (
 )
 
 type Watcher struct {
+	ProcessedChanRx <-chan NodeEvent
 	inner           *fsnotify.Watcher
 	store           EventStore
 	topDir          string
 	dirPaths        []string
 	processedChanTx chan<- NodeEvent
-	ProcessedChanRx <-chan NodeEvent
-}
-
-// TODO: make "enum"
-type NodeEvent struct {
-	Type      EventType        // "create", "modify", "delete", "rename"
-	FullPath  string           // the name of the underlying event (full path)
-	Path      string           // path of node relative to Dir.Path
-	Timestamp time.Time        // time event processed
-	State     *fnode.NodeState // node state pointer
-	node      *fnode.Node      // node pointer
-	dir       *Dir             // stored Dir for this event
-	chain     *Chain           // stored Chain for this event
-}
-
-func (t EventType) String() string {
-	switch t {
-	case Chmod:
-		return "chmod"
-	case Create:
-		return "create"
-	case Remove:
-		return "remove"
-	case Rename:
-		return "rename"
-	case Write:
-		return "write"
-	default:
-		panic(fmt.Sprintf("unexpected syncd.NodeEventType: %#v", t))
-	}
+	stopmu          sync.Mutex
+	stopping        int32
+	stopped         int32
 }
 
 func (w *Watcher) getDirForEvent(nodePath string) *Dir {
@@ -63,7 +39,62 @@ func (w *Watcher) getDirForEvent(nodePath string) *Dir {
 	return nil
 }
 
-func InitWatcher(topDir string, managedDirs []ManagedDirectory, managedMap ManagedMap, store EventStore) (*Watcher, error) {
+func (w *Watcher) Stop() {
+	w.stopmu.Lock()
+	defer w.stopmu.Unlock()
+	if atomic.LoadInt32(&w.stopping) == 1 {
+		return
+	}
+	for _, d := range w.dirPaths {
+		recursiveWatcherRemove(w.inner, filepath.Join(w.topDir, d))
+	}
+	atomic.StoreInt32(&w.stopping, 1)
+}
+
+func (w *Watcher) Close() error {
+	w.Stop()
+	for atomic.LoadInt32(&w.stopped) == 0 {
+		time.Sleep(time.Millisecond * 50)
+	}
+	return w.inner.Close()
+}
+
+func (w *Watcher) Run() {
+	inner := w.inner
+	// run loop
+	for {
+		select {
+		case event, ok := <-inner.Events:
+			if !ok { // channel closed
+				return
+			}
+			// process the event
+			logger.Trace(fmt.Sprintf("Received watcher event %s", event))
+
+			nodeEvent, err := processEvent(w, event)
+			if err != nil {
+				logger.Error(err.Error())
+				continue
+			}
+			// update watcher for new dirs
+			updateWatcher(w, nodeEvent)
+		case err, ok := <-inner.Errors:
+			if !ok { // channel closed
+				return
+			}
+			logger.Error(fmt.Sprintf("Received watcher error:\n%v", err.Error()))
+		default: // no events from fsnotify
+			// if we're stopping and we've no more events
+			if atomic.LoadInt32(&w.stopping) == 1 {
+				logger.Info(fmt.Sprintf("No more events in fsnotify.Watcher. We're done!"))
+				atomic.StoreInt32(&w.stopped, 1)
+				return
+			}
+		}
+	}
+}
+
+func InitWatcher(topDir string, syncdDirs []SyncdDirectory, store EventStore) (*Watcher, error) {
 	// create a watcher
 	inner, err := fsnotify.NewWatcher()
 	if err != nil {
@@ -79,7 +110,7 @@ func InitWatcher(topDir string, managedDirs []ManagedDirectory, managedMap Manag
 
 	// create watcher
 	tx, rx := utils.NewDroppingChannel[NodeEvent](1024)
-	watcher := Watcher{
+	w := Watcher{
 		inner:           inner,
 		store:           store,
 		topDir:          topDir,
@@ -91,73 +122,72 @@ func InitWatcher(topDir string, managedDirs []ManagedDirectory, managedMap Manag
 	// add dirs to watcher
 	for i, dir := range dirs {
 		// add this path to paths for directory lookups on node event
-		watcher.dirPaths[i] = dir.Path
+		w.dirPaths[i] = dir.Path
 		// recursively add watcher to the directory and all sub-directories
-		if err = recursiveWatcherAdd(inner, filepath.Join(topDir, dir.Path)); err != nil {
+		if err = recursiveWatcherAdd(&w, filepath.Join(topDir, dir.Path)); err != nil {
 			return nil, err
 		}
 	}
 
-	return &watcher, nil
+	return &w, nil
 }
 
-func RunWatcher(watcher *Watcher) {
-	inner := watcher.inner
-	defer inner.Close()
-	// run loop
-	for {
-		select {
-		case event, ok := <-inner.Events:
-			if !ok { // channel closed
-				return
-			}
-			logger.Trace(fmt.Sprintf("Received watcher event %s", event))
-			// transform fsnotify event into local node event
-			nodeEvent := toNodeEvent(&event)
-			if nodeEvent == nil { // ignored event
-				continue
-			}
-			// get relative paths for store
-			relPath := fnode.GetRelativePath(nodeEvent.FullPath, watcher.topDir)
-			// lookup stored directory by event name
-			dir := watcher.getDirForEvent(relPath)
-			if dir == nil {
-				logger.Error(fmt.Sprintf("Failed to find dir for event: %s", event))
-				continue
-			}
-			nodeEvent.dir = dir
-			// get relative path to node
-			nodeEvent.Path = fnode.GetRelativePath(relPath, dir.Path)
+func processEvent(watcher *Watcher, event fsnotify.Event) (*NodeEvent, error) {
+	// transform fsnotify event into local node event
+	nodeEvent := toNodeEvent(&event)
+	if nodeEvent == nil { // ignored event
+		return nil, nil
+	}
+	// get relative paths for store
+	relPath := fnode.GetRelativePath(nodeEvent.FullPath, watcher.topDir)
+	// lookup stored directory by event name
+	dir := watcher.getDirForEvent(relPath)
+	if dir == nil {
+		return nodeEvent, errors.New(fmt.Sprintf("Failed to find dir for event: %s", event))
+	}
+	nodeEvent.dir = dir
+	// get relative path to node
+	nodeEvent.Path = fnode.GetRelativePath(relPath, dir.Path)
+	// process this event
+	if err := processNodeEvent(nodeEvent, watcher.store); err != nil {
+		logger.Error(fmt.Sprintf("Failed to handle fsnotify event:\n%v\n", err.Error()))
+	}
+	// send processed event out
+	nodeEvent.doneTime = time.Now()
+	watcher.processedChanTx <- *nodeEvent
+	return nodeEvent, nil
+}
 
-			// handle this event
-			if err := handleEvent(nodeEvent, watcher.store); err != nil {
-				logger.Error(fmt.Sprintf("Failed to handle fsnotify event:\n%v\n", err.Error()))
-			}
-			watcher.processedChanTx <- *nodeEvent
-			// add/remove sub-directories to watcher
-			// no need to check if node is dir since the function won't walk if it is
-			if nodeEvent.Type == Create {
-				if err := recursiveWatcherAdd(inner, nodeEvent.FullPath); err != nil {
-					logger.Error(fmt.Sprintf("Failed to add %q to watcher.\n", nodeEvent.FullPath))
-				}
-			} else if nodeEvent.Type == Rename || nodeEvent.Type == Remove {
-				recursiveWatcherRemove(inner, nodeEvent.FullPath)
-			}
-		case err, ok := <-inner.Errors:
-			if !ok { // channel closed
-				return
-			}
-			logger.Error(fmt.Sprintf("Received watcher error:\n%v", err.Error()))
+func updateWatcher(w *Watcher, nodeEvent *NodeEvent) {
+	w.stopmu.Lock()
+	defer w.stopmu.Unlock()
+	if atomic.LoadInt32(&w.stopping) == 1 {
+		return
+	}
+	// add/remove sub-directories to watcher
+	// no need to check if node is dir since the function won't walk if it is
+	if nodeEvent.Type == Create {
+		if err := recursiveWatcherAdd(w, nodeEvent.FullPath); err != nil {
+			logger.Error(fmt.Sprintf("Failed to add %q to watcher.\n", nodeEvent.FullPath))
 		}
+		// if this ISN'T a moved directory
+		if nodeEvent.OldPath == nil {
+			if err := addSubDirsToStore(w, nodeEvent); err != nil {
+				logger.Error(fmt.Sprintf("Failed to add %q to watcher.\n", nodeEvent.FullPath))
+			}
+		}
+	} else if nodeEvent.Type == Rename || nodeEvent.Type == Remove {
+		recursiveWatcherRemove(w.inner, nodeEvent.FullPath)
 	}
 }
 
 // add directory and all sub-directories (recursively) to watcher
 // adding a directory to an fsnotify watcher will track events for subdirs themselves,
 // but not nodes inside those subdirs - see fsnotify docs
-func recursiveWatcherAdd(watcher *fsnotify.Watcher, path string) error {
+// also ensure any nodes w/o chains have chains created w/ "artificial" create event
+func recursiveWatcherAdd(w *Watcher, newPath string) error {
 	// recursively walk directory - starting at top
-	err := filepath.WalkDir(path, func(path string, d fs.DirEntry, err error) error {
+	err := filepath.WalkDir(newPath, func(path string, d fs.DirEntry, err error) error {
 		// an inability to walk a sub-directory would cause problems, but wouldn't be fatal
 		if err != nil {
 			logger.Warn(fmt.Sprintf("Unable to walk dir: %q", path))
@@ -168,7 +198,7 @@ func recursiveWatcherAdd(watcher *fsnotify.Watcher, path string) error {
 			return nil
 		}
 		// add path to watcher
-		watcher.Add(path)
+		w.inner.Add(path)
 		logger.Debug(fmt.Sprintf("Watching %q\n", path))
 
 		return nil
@@ -187,162 +217,62 @@ func recursiveWatcherRemove(watcher *fsnotify.Watcher, path string) {
 	}
 }
 
-func handleEvent(nodeEvent *NodeEvent, store EventStore) error {
-	var err error
-
-	// set node info on event
-	if err = setNode(nodeEvent); err != nil {
-		return errors.New(fmt.Sprintf("Failed to set node for: %+v", *nodeEvent))
-	}
-	// lookup chain for this event
-	if err = lkpChain(nodeEvent, store); err != nil {
-		return errors.New(fmt.Sprintf("Failed to find lookup Chain for event:  %v", nodeEvent))
-	}
-	// ignore invalid events for now
-	if err := isValidEvent(nodeEvent); err != nil {
-		return err
-	}
-	// add new chain for new nodes
-	if nodeEvent.Type == Create && nodeEvent.chain == nil {
-		// create new chain
-		newChain := &Chain{Ino: nodeEvent.node.Ino()}
-		// create and new chain
-		if err = store.AddChain(newChain, nodeEvent.dir.ID); err != nil {
-			logger.Fatal(err.Error())
-			os.Exit(1)
+// this function adds new chains and create events for sub-dirs of watched dirs
+// this covers the case when a new subdirectory w/ content is made before
+// we've added the subdirectory to the watch list (e.g. mkdir -p)
+func addSubDirsToStore(w *Watcher, nodeEvent *NodeEvent) error {
+	syncdDirPath := filepath.Join(w.topDir, nodeEvent.dir.Path)
+	dirPath := filepath.Join(syncdDirPath, nodeEvent.Path)
+	return filepath.WalkDir(dirPath, func(path string, d fs.DirEntry, err error) error {
+		// skil the root dir of walk as we've already added event
+		if path == dirPath {
+			return nil
 		}
-		nodeEvent.chain = newChain
-	}
-	// create new event to store
-	event := &Event{
-		Timestamp: nodeEvent.Timestamp,
-		Path:      nodeEvent.Path,
-		Type:      nodeEvent.Type,
-	}
-	// set event state from node
-	setEventState(event, nodeEvent.node)
-	// add event to store
-	if err = store.AddEvent(event, nodeEvent.chain.ID); err != nil {
-		logger.Fatal(err.Error())
-		os.Exit(1)
-	}
-	return nil
-}
+		// an inability to walk a sub-directory would cause problems, but wouldn't be fatal
+		if err != nil {
+			logger.Warn(fmt.Sprintf("Unable to walk dir: %q", path))
+			return nil
+		}
+		// we only want to watch directories and normal files
+		if !d.Type().IsRegular() && !d.Type().IsDir() {
+			logger.Trace(fmt.Sprintf("SKIPPING - %v : %v", path, d))
+			return nil
+		}
 
-// toNodeEvent constructs a NodeEvent from an fsnotify.Event
-// it add a timestamp and returns nil if this isn't an event we care about
-func toNodeEvent(event *fsnotify.Event) *NodeEvent {
-	// init nodeEvent
-	nodeEvent := NodeEvent{
-		FullPath:  event.Name,
-		Timestamp: time.Now(),
-	}
-	// set internal type
-	switch event.Op {
-	case fsnotify.Create:
-		nodeEvent.Type = Create
-	case fsnotify.Write:
-		nodeEvent.Type = Write
-	case fsnotify.Remove:
-		nodeEvent.Type = Remove
-	case fsnotify.Rename:
-		nodeEvent.Type = Rename
-	default:
-		return nil
-	}
-
-	return &nodeEvent
-}
-
-// setNode sets the node property on the NodeEvent struct
-// the node is used to: detect new dirs, lookup chains by ino, set event state
-func setNode(nodeEvent *NodeEvent) error {
-	switch nodeEvent.Type {
-	case Create, Write:
-		node, err := fnode.NewNode(nodeEvent.FullPath)
+		eventPath := fnode.GetRelativePath(path, syncdDirPath)
+		filepath.Join(dirPath, d.Name())
+		// create node from DirEntry
+		info, err := d.Info()
+		if err != nil {
+			if os.IsNotExist(err) {
+				return nil
+			}
+			return err
+		}
+		node, err := fnode.NewNodeFromInfo(path, info)
 		if err != nil {
 			return err
 		}
-		nodeEvent.node = node
-	case Rename, Remove:
-	default:
-		return errors.ErrUnsupported
-	}
-
-	return nil
-}
-
-// lkpChain finds a chain in the event store for a given event
-// it uses inode lookup for creates/writes and paths for rename/remove
-func lkpChain(nodeEvent *NodeEvent, store EventStore) error {
-	var chain *Chain
-	var err error
-
-	switch nodeEvent.Type {
-	case Create, Write:
-		chain, err = store.GetChainByIno(nodeEvent.node.Ino())
-	case Remove, Rename:
-		chain, err = store.GetChainByPath(nodeEvent.dir.ID, nodeEvent.Path)
-	default:
-		return errors.ErrUnsupported
-	}
-	if err != nil {
-		return err
-	}
-	nodeEvent.chain = chain
-	return nil
-}
-
-// isValidEvent ensures dirEvent is properly initialized for processing
-func isValidEvent(nodeEvent *NodeEvent) error {
-	node := nodeEvent.node
-	chain := nodeEvent.chain
-	switch nodeEvent.Type {
-	case Create:
-		if node == nil {
-			return errors.New("create w/ no node")
+		// add chain for new node
+		chain := &Chain{Ino: node.Ino}
+		// add new chain
+		if err = w.store.AddChain(chain, nodeEvent.dir.ID); err != nil {
+			logger.Fatal(err.Error())
+			os.Exit(1)
 		}
-		if node.Type() < 1 {
-			return errors.New(fmt.Sprintf("create unsupported node: %v", node))
+		// add create event to chain
+		state := node.State()
+		event := Event{
+			Timestamp: time.Now(),
+			Path:      eventPath,
+			Type:      Create,
+			Size:      state.Size,
+			Hash:      state.Hash,
+			ModTime:   state.ModTime,
 		}
-	case Write:
-		if node == nil {
-			return errors.New("write w/ no node")
+		if err = w.store.AddEvent(&event, chain.ID); err != nil {
+			return err
 		}
-		if node.Type() < 1 {
-			return errors.New(fmt.Sprintf("write unsupported node: %v", node))
-		}
-		if chain == nil {
-			return errors.New(fmt.Sprintf("write w/ no chain"))
-		}
-	case Rename:
-		if chain == nil {
-			return errors.New(fmt.Sprintf("rename w/ no chain"))
-		}
-	case Remove:
-		if chain == nil {
-			return errors.New(fmt.Sprintf("remove w/ no chain"))
-		}
-	default:
-		return errors.New(fmt.Sprintf("Unsupported event operation: %v", nodeEvent.Type))
-	}
-	return nil
-}
-
-func setEventState(event *Event, node *fnode.Node) {
-	switch event.Type {
-	case Create:
-		// set event node state props
-		nodeState := node.State()
-		event.ModTime = node.ModTime()
-		event.Size = node.Size()
-		event.Hash = nodeState.Hash
-	case Write:
-		// set event node state props
-		nodeState := node.State()
-		event.ModTime = node.ModTime()
-		event.Size = node.Size()
-		event.Hash = nodeState.Hash
-	default:
-	}
+		return nil
+	})
 }

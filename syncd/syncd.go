@@ -12,42 +12,25 @@ import (
 	"github.com/gobwas/glob"
 )
 
-type ManagedDirectory struct {
+type SyncdDirectory struct {
 	Path    string   `yaml:"path"`
 	Include []string `yaml:"incl"`
 	Exclude []string `yaml:"excl"`
 }
 
-type ManagedMap map[string][]fnode.Node
+func GetSyncdNodes(topDir string, syncdDir SyncdDirectory) ([]fnode.Node, error) {
+	syncdNodes := make([]fnode.Node, 0)
 
-func GetManagedMap(topDir string, managedDirs []ManagedDirectory) (ManagedMap, error) {
-	managedMap := make(map[string][]fnode.Node)
+	inclGlobs := mapToGlobs(syncdDir.Include)
+	exclGlobs := mapToGlobs(syncdDir.Exclude)
 
-	for _, managedDir := range managedDirs {
-		managedFiles, err := GetManagedNodes(topDir, managedDir)
-		if err != nil {
-			return nil, err
-		}
+	fullDirPath := filepath.Join(topDir, syncdDir.Path)
 
-		managedMap[managedDir.Path] = managedFiles
-	}
-
-	return managedMap, nil
-}
-
-func GetManagedNodes(topDir string, managedDir ManagedDirectory) ([]fnode.Node, error) {
-	managedFiles := make([]fnode.Node, 0)
-
-	inclGlobs := mapToGlobs(managedDir.Include)
-	exclGlobs := mapToGlobs(managedDir.Exclude)
-
-	fullDirPath := filepath.Join(topDir, managedDir.Path)
-
-	logger.Trace(fmt.Sprintf("Walking managed dir topdir: %q - managedDir.Path: %q - %q\n", topDir, managedDir.Path, fullDirPath))
+	logger.Trace(fmt.Sprintf("Walking syncd dir topdir: %q - syncdDir.Path: %q - %q\n", topDir, syncdDir.Path, fullDirPath))
 	err := filepath.WalkDir(fullDirPath, func(path string, d fs.DirEntry, err error) error {
 
 		if err != nil {
-			return errors.New(fmt.Sprintf("Failure when walking dir: %v\npath: %v\n%v\n", managedDir.Path, path, err))
+			return errors.New(fmt.Sprintf("Failure when walking dir: %v\npath: %v\n%v\n", syncdDir.Path, path, err))
 		}
 
 		if path == fullDirPath {
@@ -86,7 +69,7 @@ func GetManagedNodes(topDir string, managedDir ManagedDirectory) ([]fnode.Node, 
 			return err
 		}
 
-		managedFiles = append(managedFiles, *node)
+		syncdNodes = append(syncdNodes, *node)
 
 		return nil
 	})
@@ -95,7 +78,7 @@ func GetManagedNodes(topDir string, managedDir ManagedDirectory) ([]fnode.Node, 
 		return nil, err
 	}
 
-	return managedFiles, nil
+	return syncdNodes, nil
 }
 
 func mapToGlobs(globStrs []string) []glob.Glob {

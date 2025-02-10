@@ -9,7 +9,7 @@ import (
 	"github.com/stretchr/testify/assert"
 )
 
-func helperTestGetManagedFiles(t *testing.T, tmpDir utils.TmpDir, include []string, exclude []string, wanted []string) {
+func helperTestGetSyncdFiles(t *testing.T, tmpDir utils.TmpDir, include []string, exclude []string, wanted []string) {
 	tmpFs := utils.TmpFs{Dirs: []*utils.TmpDir{&tmpDir}}
 	err := tmpFs.Instantiate()
 	if err != nil {
@@ -17,23 +17,23 @@ func helperTestGetManagedFiles(t *testing.T, tmpDir utils.TmpDir, include []stri
 	}
 	defer tmpFs.Destroy()
 
-	managedDir := ManagedDirectory{
+	syncdDir := SyncdDirectory{
 		Path:    tmpDir.Name,
 		Include: include,
 		Exclude: exclude,
 	}
-	managedFiles, err := GetManagedNodes(tmpFs.Path, managedDir)
+	syncdNodes, err := GetSyncdNodes(tmpFs.Path, syncdDir)
 
-	got := make([]string, len(managedFiles))
+	got := make([]string, len(syncdNodes))
 
-	for i, managedFile := range managedFiles {
-		got[i] = fnode.GetRelativePath(managedFile.Path, filepath.Join(tmpFs.Path, managedDir.Path))
+	for i, syncdFile := range syncdNodes {
+		got[i] = fnode.GetRelativePath(syncdFile.Path, filepath.Join(tmpFs.Path, syncdDir.Path))
 	}
 
 	assert.ElementsMatch(t, wanted, got)
 }
 
-func TestGetManagedFilesEmptyDir(t *testing.T) {
+func TestGetSyncdFilesEmptyDir(t *testing.T) {
 	wanted := []string{}
 
 	tmpDir := utils.TmpDir{
@@ -45,10 +45,10 @@ func TestGetManagedFilesEmptyDir(t *testing.T) {
 	include := []string{}
 	exclude := []string{}
 
-	helperTestGetManagedFiles(t, tmpDir, include, exclude, wanted)
+	helperTestGetSyncdFiles(t, tmpDir, include, exclude, wanted)
 }
 
-func TestGetManagedFiles(t *testing.T) {
+func TestGetSyncdFiles(t *testing.T) {
 	wanted := []string{
 		"f1.txt",
 		"f2.txt",
@@ -68,10 +68,10 @@ func TestGetManagedFiles(t *testing.T) {
 	include := []string{}
 	exclude := []string{}
 
-	helperTestGetManagedFiles(t, tmpDir, include, exclude, wanted)
+	helperTestGetSyncdFiles(t, tmpDir, include, exclude, wanted)
 }
 
-func TestGetManagedFilesIncludeGlob(t *testing.T) {
+func TestGetSyncdFilesIncludeGlob(t *testing.T) {
 	wanted := []string{
 		"f1.txt",
 	}
@@ -89,10 +89,10 @@ func TestGetManagedFilesIncludeGlob(t *testing.T) {
 	include := []string{"f*.txt"}
 	exclude := []string{}
 
-	helperTestGetManagedFiles(t, tmpDir, include, exclude, wanted)
+	helperTestGetSyncdFiles(t, tmpDir, include, exclude, wanted)
 }
 
-func TestGetManagedFilesExcludeGlob(t *testing.T) {
+func TestGetSyncdFilesExcludeGlob(t *testing.T) {
 	wanted := []string{
 		"f1.txt",
 	}
@@ -110,10 +110,10 @@ func TestGetManagedFilesExcludeGlob(t *testing.T) {
 	include := []string{}
 	exclude := []string{"*.dat", "bad*"}
 
-	helperTestGetManagedFiles(t, tmpDir, include, exclude, wanted)
+	helperTestGetSyncdFiles(t, tmpDir, include, exclude, wanted)
 }
 
-func TestGetManagedFilesIncludeExcludeGlob(t *testing.T) {
+func TestGetSyncdFilesIncludeExcludeGlob(t *testing.T) {
 	wanted := []string{
 		"f1.txt",
 	}
@@ -132,10 +132,10 @@ func TestGetManagedFilesIncludeExcludeGlob(t *testing.T) {
 	include := []string{"f1*"}
 	exclude := []string{"*.dat", "bad*"}
 
-	helperTestGetManagedFiles(t, tmpDir, include, exclude, wanted)
+	helperTestGetSyncdFiles(t, tmpDir, include, exclude, wanted)
 }
 
-func TestGetManagedFilesSubDirs(t *testing.T) {
+func TestGetSyncdFilesSubDirs(t *testing.T) {
 	wanted := []string{
 		"f1.txt",
 		"f2.txt",
@@ -188,10 +188,10 @@ func TestGetManagedFilesSubDirs(t *testing.T) {
 	include := []string{}
 	exclude := []string{}
 
-	helperTestGetManagedFiles(t, tmpDir, include, exclude, wanted)
+	helperTestGetSyncdFiles(t, tmpDir, include, exclude, wanted)
 }
 
-func TestGetManagedFilesSubDirsIncludeExcludeGlob(t *testing.T) {
+func TestGetSyncdFilesSubDirsIncludeExcludeGlob(t *testing.T) {
 	wanted := []string{
 		"f1.txt",
 		"f2.txt",
@@ -240,5 +240,5 @@ func TestGetManagedFilesSubDirsIncludeExcludeGlob(t *testing.T) {
 	include := []string{"*.txt", "**/"}
 	exclude := []string{"sub3/sub4**"}
 
-	helperTestGetManagedFiles(t, tmpDir, include, exclude, wanted)
+	helperTestGetSyncdFiles(t, tmpDir, include, exclude, wanted)
 }

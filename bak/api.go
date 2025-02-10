@@ -61,7 +61,7 @@ func (h *syncHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	// relDir := filepath.Join(h.config.TopDir, dirPath)
 	var managedDir *ManagedDirectory
 
-	for _, d := range h.config.ManagedDirectories {
+	for _, d := range h.config.WatchedDirectories {
 		logger.Trace(fmt.Sprintf("%q | %+v\n", dirPath, d))
 		if d.Path != dirPath {
 			continue

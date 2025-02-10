@@ -87,6 +87,10 @@ func (s *BadgerStore) AddEvent(event *syncd.Event, chainID syncd.ID) error {
 	}
 	// set ID
 	event.ID = &id
+	// set the old path
+	if badgerEvent.OldPath != "" {
+		event.OldPath = &badgerEvent.OldPath
+	}
 	return nil
 }
 
@@ -190,6 +194,14 @@ func (s *BadgerStore) GetChainByIno(ino uint64) (*syncd.Chain, error) {
 
 func (s *BadgerStore) GetEventByID(eventID syncd.ID) (*syncd.Event, error) {
 	panic("GetEventByID not implemented")
+}
+
+func (s *BadgerStore) GetPrevEvent(eventID syncd.ID) (*syncd.Event, error) {
+	panic("GetPrevEvent not implemented")
+}
+
+func (s *BadgerStore) GetNextEvent(eventID syncd.ID) (*syncd.Event, error) {
+	panic("GetNextEvent not implemented")
 }
 
 func (s *BadgerStore) GetDirs() ([]syncd.Dir, error) {
@@ -312,14 +324,19 @@ func badgerChainToChain(bdgChain BadgerChain) syncd.Chain {
 
 func badgerEventToEvent(bdgEvent BadgerEvent) syncd.Event {
 	var hash *string
+	var oldPath *string
 	if bdgEvent.Hash != "" {
 		hash = &bdgEvent.Hash
+	}
+	if bdgEvent.OldPath != "" {
+		oldPath = &bdgEvent.OldPath
 	}
 	id := *&bdgEvent.ID
 	return syncd.Event{
 		ID:        &id,
 		Timestamp: bdgEvent.Timestamp,
 		Path:      bdgEvent.Path,
+		OldPath:   oldPath,
 		Type:      bdgEvent.Type,
 		Size:      bdgEvent.Size,
 		Hash:      hash,
