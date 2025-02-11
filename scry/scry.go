@@ -1,4 +1,4 @@
-package syncd
+package scry
 
 import (
 	"errors"
@@ -12,25 +12,25 @@ import (
 	"github.com/gobwas/glob"
 )
 
-type SyncdDirectory struct {
+type ScriedDirectory struct {
 	Path    string   `yaml:"path"`
 	Include []string `yaml:"incl"`
 	Exclude []string `yaml:"excl"`
 }
 
-func GetSyncdNodes(topDir string, syncdDir SyncdDirectory) ([]fnode.Node, error) {
-	syncdNodes := make([]fnode.Node, 0)
+func GetScriedNodes(topDir string, scryDir ScriedDirectory) ([]fnode.Node, error) {
+	scryNodes := make([]fnode.Node, 0)
 
-	inclGlobs := mapToGlobs(syncdDir.Include)
-	exclGlobs := mapToGlobs(syncdDir.Exclude)
+	inclGlobs := mapToGlobs(scryDir.Include)
+	exclGlobs := mapToGlobs(scryDir.Exclude)
 
-	fullDirPath := filepath.Join(topDir, syncdDir.Path)
+	fullDirPath := filepath.Join(topDir, scryDir.Path)
 
-	logger.Trace(fmt.Sprintf("Walking syncd dir topdir: %q - syncdDir.Path: %q - %q\n", topDir, syncdDir.Path, fullDirPath))
+	logger.Trace(fmt.Sprintf("Walking scry dir topdir: %q - scryDir.Path: %q - %q\n", topDir, scryDir.Path, fullDirPath))
 	err := filepath.WalkDir(fullDirPath, func(path string, d fs.DirEntry, err error) error {
 
 		if err != nil {
-			return errors.New(fmt.Sprintf("Failure when walking dir: %v\npath: %v\n%v\n", syncdDir.Path, path, err))
+			return errors.New(fmt.Sprintf("Failure when walking dir: %v\npath: %v\n%v\n", scryDir.Path, path, err))
 		}
 
 		if path == fullDirPath {
@@ -69,7 +69,7 @@ func GetSyncdNodes(topDir string, syncdDir SyncdDirectory) ([]fnode.Node, error)
 			return err
 		}
 
-		syncdNodes = append(syncdNodes, *node)
+		scryNodes = append(scryNodes, *node)
 
 		return nil
 	})
@@ -78,7 +78,7 @@ func GetSyncdNodes(topDir string, syncdDir SyncdDirectory) ([]fnode.Node, error)
 		return nil, err
 	}
 
-	return syncdNodes, nil
+	return scryNodes, nil
 }
 
 func mapToGlobs(globStrs []string) []glob.Glob {

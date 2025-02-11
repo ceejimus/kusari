@@ -4,7 +4,7 @@ import (
 	"errors"
 	"fmt"
 
-	"github.com/ceejimus/kusari/syncd"
+	"github.com/ceejimus/kusari/scry"
 	badger "github.com/dgraph-io/badger/v4"
 )
 
@@ -27,7 +27,7 @@ func NewBadgerStore(dbDir string) (*BadgerStore, error) {
 	}, nil
 }
 
-func (s *BadgerStore) AddDir(dir *syncd.Dir) error {
+func (s *BadgerStore) AddDir(dir *scry.Dir) error {
 	if dir.ID != nil {
 		return errors.New(fmt.Sprintf("Cannot add new dir, non-nil ID %v", dir))
 	}
@@ -40,7 +40,7 @@ func (s *BadgerStore) AddDir(dir *syncd.Dir) error {
 	return nil
 }
 
-func (s *BadgerStore) AddChain(chain *syncd.Chain, dirID syncd.ID) error {
+func (s *BadgerStore) AddChain(chain *scry.Chain, dirID scry.ID) error {
 	if chain.ID != nil {
 		return errors.New(fmt.Sprintf("Cannot add new chain, non-nil ID %v", chain))
 	}
@@ -59,7 +59,7 @@ func (s *BadgerStore) AddChain(chain *syncd.Chain, dirID syncd.ID) error {
 	return nil
 }
 
-func (s *BadgerStore) AddEvent(event *syncd.Event, chainID syncd.ID) error {
+func (s *BadgerStore) AddEvent(event *scry.Event, chainID scry.ID) error {
 	var id BadgerID
 	if event.ID != nil {
 		return errors.New(fmt.Sprintf("Cannot add new event, non-nil ID %v", event))
@@ -94,8 +94,8 @@ func (s *BadgerStore) AddEvent(event *syncd.Event, chainID syncd.ID) error {
 	return nil
 }
 
-func (s *BadgerStore) GetDirByID(dirID syncd.ID) (*syncd.Dir, error) {
-	var dir *syncd.Dir
+func (s *BadgerStore) GetDirByID(dirID scry.ID) (*scry.Dir, error) {
+	var dir *scry.Dir
 
 	bdgID, err := toBadgerID(dirID.Encode())
 	if err != nil {
@@ -116,8 +116,8 @@ func (s *BadgerStore) GetDirByID(dirID syncd.ID) (*syncd.Dir, error) {
 	return dir, nil
 }
 
-func (s *BadgerStore) GetDirByPath(path string) (*syncd.Dir, error) {
-	var dir *syncd.Dir
+func (s *BadgerStore) GetDirByPath(path string) (*scry.Dir, error) {
+	var dir *scry.Dir
 	if err := s.db.View(func(txn *badger.Txn) error {
 		bdgDir, err := getDirByPath(txn, path)
 		if bdgDir == nil || err != nil {
@@ -132,8 +132,8 @@ func (s *BadgerStore) GetDirByPath(path string) (*syncd.Dir, error) {
 	return dir, nil
 }
 
-func (s *BadgerStore) GetChainByID(chainID syncd.ID) (*syncd.Chain, error) {
-	var chain *syncd.Chain
+func (s *BadgerStore) GetChainByID(chainID scry.ID) (*scry.Chain, error) {
+	var chain *scry.Chain
 	bdgID, err := toBadgerID(chainID.Encode())
 	if err != nil {
 		return nil, err
@@ -152,8 +152,8 @@ func (s *BadgerStore) GetChainByID(chainID syncd.ID) (*syncd.Chain, error) {
 	return chain, nil
 }
 
-func (s *BadgerStore) GetChainByPath(dirID syncd.ID, path string) (*syncd.Chain, error) {
-	var chain *syncd.Chain
+func (s *BadgerStore) GetChainByPath(dirID scry.ID, path string) (*scry.Chain, error) {
+	var chain *scry.Chain
 	bdgID, err := toBadgerID(dirID.Encode())
 	if err != nil {
 		return nil, err
@@ -176,8 +176,8 @@ func (s *BadgerStore) GetChainByPath(dirID syncd.ID, path string) (*syncd.Chain,
 	return chain, nil
 }
 
-func (s *BadgerStore) GetChainByIno(ino uint64) (*syncd.Chain, error) {
-	var chain *syncd.Chain
+func (s *BadgerStore) GetChainByIno(ino uint64) (*scry.Chain, error) {
+	var chain *scry.Chain
 	if err := s.db.View(func(txn *badger.Txn) error {
 		bdgChain, err := getChainByIno(txn, ino)
 		if bdgChain == nil || err != nil {
@@ -192,19 +192,19 @@ func (s *BadgerStore) GetChainByIno(ino uint64) (*syncd.Chain, error) {
 	return chain, nil
 }
 
-func (s *BadgerStore) GetEventByID(eventID syncd.ID) (*syncd.Event, error) {
+func (s *BadgerStore) GetEventByID(eventID scry.ID) (*scry.Event, error) {
 	panic("GetEventByID not implemented")
 }
 
-func (s *BadgerStore) GetPrevEvent(eventID syncd.ID) (*syncd.Event, error) {
+func (s *BadgerStore) GetPrevEvent(eventID scry.ID) (*scry.Event, error) {
 	panic("GetPrevEvent not implemented")
 }
 
-func (s *BadgerStore) GetNextEvent(eventID syncd.ID) (*syncd.Event, error) {
+func (s *BadgerStore) GetNextEvent(eventID scry.ID) (*scry.Event, error) {
 	panic("GetNextEvent not implemented")
 }
 
-func (s *BadgerStore) GetDirs() ([]syncd.Dir, error) {
+func (s *BadgerStore) GetDirs() ([]scry.Dir, error) {
 	var bdgDirs []BadgerDir
 	if err := s.db.View(func(txn *badger.Txn) error {
 		var err error
@@ -215,7 +215,7 @@ func (s *BadgerStore) GetDirs() ([]syncd.Dir, error) {
 		return nil, err
 	}
 
-	dirs := make([]syncd.Dir, len(bdgDirs))
+	dirs := make([]scry.Dir, len(bdgDirs))
 	for i, bdgDir := range bdgDirs {
 		dirs[i] = badgerDirToDir(bdgDir)
 	}
@@ -223,7 +223,7 @@ func (s *BadgerStore) GetDirs() ([]syncd.Dir, error) {
 	return dirs, nil
 }
 
-func (s *BadgerStore) GetChainsInDir(dirID syncd.ID) ([]syncd.Chain, error) {
+func (s *BadgerStore) GetChainsInDir(dirID scry.ID) ([]scry.Chain, error) {
 	var bdgChains []BadgerChain
 	if err := s.db.View(func(txn *badger.Txn) error {
 		var ids [][]byte
@@ -256,7 +256,7 @@ func (s *BadgerStore) GetChainsInDir(dirID syncd.ID) ([]syncd.Chain, error) {
 		return nil, err
 	}
 
-	chains := make([]syncd.Chain, len(bdgChains))
+	chains := make([]scry.Chain, len(bdgChains))
 	for i, bdgChain := range bdgChains {
 		chains[i] = badgerChainToChain(bdgChain)
 	}
@@ -264,7 +264,7 @@ func (s *BadgerStore) GetChainsInDir(dirID syncd.ID) ([]syncd.Chain, error) {
 	return chains, nil
 }
 
-func (s *BadgerStore) GetEventsInChain(chainID syncd.ID) ([]syncd.Event, error) {
+func (s *BadgerStore) GetEventsInChain(chainID scry.ID) ([]scry.Event, error) {
 	var bdgEvents []BadgerEvent
 	bdgID, err := toBadgerID(chainID.Encode())
 	if err != nil {
@@ -291,7 +291,7 @@ func (s *BadgerStore) GetEventsInChain(chainID syncd.ID) ([]syncd.Event, error) 
 		return nil, err
 	}
 
-	events := make([]syncd.Event, len(bdgEvents))
+	events := make([]scry.Event, len(bdgEvents))
 	for i, bdgEvent := range bdgEvents {
 		events[i] = badgerEventToEvent(bdgEvent)
 	}
@@ -306,23 +306,23 @@ func (s *BadgerStore) Close() error {
 	return s.db.Close()
 }
 
-func badgerDirToDir(bdgDir BadgerDir) syncd.Dir {
-	return syncd.Dir{
+func badgerDirToDir(bdgDir BadgerDir) scry.Dir {
+	return scry.Dir{
 		ID:   &bdgDir.ID,
 		Path: bdgDir.Path,
 	}
 }
 
-func badgerChainToChain(bdgChain BadgerChain) syncd.Chain {
+func badgerChainToChain(bdgChain BadgerChain) scry.Chain {
 	id := new(BadgerID)
 	*id = bdgChain.ID
-	return syncd.Chain{
+	return scry.Chain{
 		ID:  id,
 		Ino: bdgChain.Ino,
 	}
 }
 
-func badgerEventToEvent(bdgEvent BadgerEvent) syncd.Event {
+func badgerEventToEvent(bdgEvent BadgerEvent) scry.Event {
 	var hash *string
 	var oldPath *string
 	if bdgEvent.Hash != "" {
@@ -332,7 +332,7 @@ func badgerEventToEvent(bdgEvent BadgerEvent) syncd.Event {
 		oldPath = &bdgEvent.OldPath
 	}
 	id := *&bdgEvent.ID
-	return syncd.Event{
+	return scry.Event{
 		ID:        &id,
 		Timestamp: bdgEvent.Timestamp,
 		Path:      bdgEvent.Path,

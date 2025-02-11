@@ -8,7 +8,7 @@ import (
 
 	"github.com/ceejimus/kusari/fnode"
 	"github.com/ceejimus/kusari/logger"
-	"github.com/ceejimus/kusari/syncd"
+	"github.com/ceejimus/kusari/scry"
 	"github.com/ceejimus/kusari/utils"
 	"golang.org/x/sys/unix"
 )
@@ -52,13 +52,13 @@ func TestExistingFileRemove(t *testing.T) {
 		Chain{
 			{
 				Path: "a",
-				Type: syncd.Create,
+				Type: scry.Create,
 				Size: uint64(len(content)),
 				Hash: &hash,
 			},
 			{
 				Path: "a",
-				Type: syncd.Remove,
+				Type: scry.Remove,
 			},
 		},
 	}
@@ -94,28 +94,28 @@ func TestSingleFileCWRR(t *testing.T) {
 		Chain{
 			{
 				Path: "a",
-				Type: syncd.Create,
+				Type: scry.Create,
 				Size: 0,
 			},
 			{
 				Path: "a",
-				Type: syncd.Write,
+				Type: scry.Write,
 				Size: uint64(len(content)),
 				Hash: &hash,
 			},
 			{
 				Path: "a",
-				Type: syncd.Rename,
+				Type: scry.Rename,
 			},
 			{
 				Path: "b",
-				Type: syncd.Create,
+				Type: scry.Create,
 				Size: uint64(len(content)),
 				Hash: &hash,
 			},
 			{
 				Path: "b",
-				Type: syncd.Remove,
+				Type: scry.Remove,
 			},
 		},
 	}
@@ -145,21 +145,21 @@ func TestTouchMovedFilename(t *testing.T) {
 		Chain{
 			{
 				Path: "a",
-				Type: syncd.Create,
+				Type: scry.Create,
 				Size: 0,
 			},
 			{
 				Path: "a",
-				Type: syncd.Rename,
+				Type: scry.Rename,
 			},
 			{
 				Path: "b",
-				Type: syncd.Create,
+				Type: scry.Create,
 				Size: 0,
 			},
 			{
 				Path: "b",
-				Type: syncd.Remove,
+				Type: scry.Remove,
 			},
 		},
 	}
@@ -167,12 +167,12 @@ func TestTouchMovedFilename(t *testing.T) {
 		Chain{
 			{
 				Path: "a",
-				Type: syncd.Create,
+				Type: scry.Create,
 				Size: 0,
 			},
 			{
 				Path: "a",
-				Type: syncd.Remove,
+				Type: scry.Remove,
 			},
 		},
 	}
@@ -203,12 +203,12 @@ func TestFilesMovedBetweenSubdirs(t *testing.T) {
 		Chain{
 			{
 				Path: "s1",
-				Type: syncd.Create,
+				Type: scry.Create,
 				Size: DIR_BLOCK_SIZE,
 			},
 			{
 				Path: "s1",
-				Type: syncd.Remove,
+				Type: scry.Remove,
 			},
 		},
 	}
@@ -216,12 +216,12 @@ func TestFilesMovedBetweenSubdirs(t *testing.T) {
 		Chain{
 			{
 				Path: "s2",
-				Type: syncd.Create,
+				Type: scry.Create,
 				Size: DIR_BLOCK_SIZE,
 			},
 			{
 				Path: "s2",
-				Type: syncd.Remove,
+				Type: scry.Remove,
 			},
 		},
 	}
@@ -229,21 +229,21 @@ func TestFilesMovedBetweenSubdirs(t *testing.T) {
 		Chain{
 			{
 				Path: "s1/a",
-				Type: syncd.Create,
+				Type: scry.Create,
 				Size: 0,
 			},
 			{
 				Path: "s1/a",
-				Type: syncd.Rename,
+				Type: scry.Rename,
 			},
 			{
 				Path: "s2/a",
-				Type: syncd.Create,
+				Type: scry.Create,
 				Size: 0,
 			},
 			{
 				Path: "s2/a",
-				Type: syncd.Remove,
+				Type: scry.Remove,
 			},
 		},
 	}
@@ -276,12 +276,12 @@ func TestEmptyDirsMovedBetweenSubdirs(t *testing.T) {
 		Chain{
 			{
 				Path: "s1",
-				Type: syncd.Create,
+				Type: scry.Create,
 				Size: DIR_BLOCK_SIZE,
 			},
 			{
 				Path: "s1",
-				Type: syncd.Remove,
+				Type: scry.Remove,
 			},
 		},
 	}
@@ -289,12 +289,12 @@ func TestEmptyDirsMovedBetweenSubdirs(t *testing.T) {
 		Chain{
 			{
 				Path: "s2",
-				Type: syncd.Create,
+				Type: scry.Create,
 				Size: DIR_BLOCK_SIZE,
 			},
 			{
 				Path: "s2",
-				Type: syncd.Remove,
+				Type: scry.Remove,
 			},
 		},
 	}
@@ -302,21 +302,21 @@ func TestEmptyDirsMovedBetweenSubdirs(t *testing.T) {
 		Chain{
 			{
 				Path: "s1/s3",
-				Type: syncd.Create,
+				Type: scry.Create,
 				Size: DIR_BLOCK_SIZE,
 			},
 			{
 				Path: "s1/s3",
-				Type: syncd.Rename,
+				Type: scry.Rename,
 			},
 			{
 				Path: "s2/s3",
-				Type: syncd.Create,
+				Type: scry.Create,
 				Size: DIR_BLOCK_SIZE,
 			},
 			{
 				Path: "s2/s3",
-				Type: syncd.Remove,
+				Type: scry.Remove,
 			},
 		},
 	}
@@ -349,12 +349,12 @@ func TestNonEmptyDirsMovedBetweenSubdirs(t *testing.T) {
 		Chain{
 			{
 				Path: "s1",
-				Type: syncd.Create,
+				Type: scry.Create,
 				Size: DIR_BLOCK_SIZE,
 			},
 			{
 				Path: "s1",
-				Type: syncd.Remove,
+				Type: scry.Remove,
 			},
 		},
 	}
@@ -362,12 +362,12 @@ func TestNonEmptyDirsMovedBetweenSubdirs(t *testing.T) {
 		Chain{
 			{
 				Path: "s2",
-				Type: syncd.Create,
+				Type: scry.Create,
 				Size: DIR_BLOCK_SIZE,
 			},
 			{
 				Path: "s2",
-				Type: syncd.Remove,
+				Type: scry.Remove,
 			},
 		},
 	}
@@ -375,21 +375,21 @@ func TestNonEmptyDirsMovedBetweenSubdirs(t *testing.T) {
 		Chain{
 			{
 				Path: "s1/s3",
-				Type: syncd.Create,
+				Type: scry.Create,
 				Size: DIR_BLOCK_SIZE,
 			},
 			{
 				Path: "s1/s3",
-				Type: syncd.Rename,
+				Type: scry.Rename,
 			},
 			{
 				Path: "s2/s3",
-				Type: syncd.Create,
+				Type: scry.Create,
 				Size: DIR_BLOCK_SIZE,
 			},
 			{
 				Path: "s2/s3",
-				Type: syncd.Remove,
+				Type: scry.Remove,
 			},
 		},
 	}
@@ -397,11 +397,11 @@ func TestNonEmptyDirsMovedBetweenSubdirs(t *testing.T) {
 		Chain{
 			{
 				Path: "s1/s3/a",
-				Type: syncd.Create,
+				Type: scry.Create,
 			},
 			{
 				Path: "s2/s3/a",
-				Type: syncd.Remove,
+				Type: scry.Remove,
 			},
 		},
 	}
@@ -436,12 +436,12 @@ func TestMoveNonEmptySubdirThenMoveFileOut(t *testing.T) {
 		Chain{
 			{
 				Path: "s1",
-				Type: syncd.Create,
+				Type: scry.Create,
 				Size: DIR_BLOCK_SIZE,
 			},
 			{
 				Path: "s1",
-				Type: syncd.Remove,
+				Type: scry.Remove,
 			},
 		},
 	}
@@ -449,12 +449,12 @@ func TestMoveNonEmptySubdirThenMoveFileOut(t *testing.T) {
 		Chain{
 			{
 				Path: "s2",
-				Type: syncd.Create,
+				Type: scry.Create,
 				Size: DIR_BLOCK_SIZE,
 			},
 			{
 				Path: "s2",
-				Type: syncd.Remove,
+				Type: scry.Remove,
 			},
 		},
 	}
@@ -462,12 +462,12 @@ func TestMoveNonEmptySubdirThenMoveFileOut(t *testing.T) {
 		Chain{
 			{
 				Path: "s2/s4",
-				Type: syncd.Create,
+				Type: scry.Create,
 				Size: DIR_BLOCK_SIZE,
 			},
 			{
 				Path: "s2/s4",
-				Type: syncd.Remove,
+				Type: scry.Remove,
 			},
 		},
 	}
@@ -475,21 +475,21 @@ func TestMoveNonEmptySubdirThenMoveFileOut(t *testing.T) {
 		Chain{
 			{
 				Path: "s1/s3",
-				Type: syncd.Create,
+				Type: scry.Create,
 				Size: DIR_BLOCK_SIZE,
 			},
 			{
 				Path: "s1/s3",
-				Type: syncd.Rename,
+				Type: scry.Rename,
 			},
 			{
 				Path: "s2/s4/s3",
-				Type: syncd.Create,
+				Type: scry.Create,
 				Size: DIR_BLOCK_SIZE,
 			},
 			{
 				Path: "s2/s4/s3",
-				Type: syncd.Remove,
+				Type: scry.Remove,
 			},
 		},
 	}
@@ -497,21 +497,21 @@ func TestMoveNonEmptySubdirThenMoveFileOut(t *testing.T) {
 		Chain{
 			{
 				Path: "s1/s3/a",
-				Type: syncd.Create,
+				Type: scry.Create,
 				Size: 0,
 			},
 			{
 				Path: "s2/s4/s3/a",
-				Type: syncd.Rename,
+				Type: scry.Rename,
 			},
 			{
 				Path: "s1/a",
-				Type: syncd.Create,
+				Type: scry.Create,
 				Size: 0,
 			},
 			{
 				Path: "s1/a",
-				Type: syncd.Remove,
+				Type: scry.Remove,
 			},
 		},
 	}
@@ -549,23 +549,23 @@ func TestInodeReuseByTouch(t *testing.T) {
 		Chain{
 			{
 				Path: "a",
-				Type: syncd.Create,
+				Type: scry.Create,
 				Size: 0,
 			},
 			{
 				Path: "a",
-				Type: syncd.Remove,
+				Type: scry.Remove,
 			},
 		},
 		Chain{
 			{
 				Path: "a",
-				Type: syncd.Create,
+				Type: scry.Create,
 				Size: 0,
 			},
 			{
 				Path: "a",
-				Type: syncd.Remove,
+				Type: scry.Remove,
 			},
 		},
 	}
@@ -595,28 +595,28 @@ func TestFileReuseByMove(t *testing.T) {
 		Chain{
 			{
 				Path: "a",
-				Type: syncd.Create,
+				Type: scry.Create,
 				Size: 0,
 			},
 		},
 		Chain{
 			{
 				Path: "b",
-				Type: syncd.Create,
+				Type: scry.Create,
 				Size: 0,
 			},
 			{
 				Path: "b",
-				Type: syncd.Rename,
+				Type: scry.Rename,
 			},
 			{
 				Path: "a",
-				Type: syncd.Create,
+				Type: scry.Create,
 				Size: 0,
 			},
 			{
 				Path: "a",
-				Type: syncd.Remove,
+				Type: scry.Remove,
 			},
 		},
 	}
@@ -652,18 +652,18 @@ func TestFileCopiedThenRemoved(t *testing.T) {
 		Chain{
 			{
 				Path: "a",
-				Type: syncd.Create,
+				Type: scry.Create,
 				Size: 0,
 			},
 			{
 				Path: "a",
-				Type: syncd.Write,
+				Type: scry.Write,
 				Size: uint64(len(content)),
 				Hash: &hash,
 			},
 			{
 				Path: "a",
-				Type: syncd.Remove,
+				Type: scry.Remove,
 			},
 		},
 	}
@@ -671,18 +671,18 @@ func TestFileCopiedThenRemoved(t *testing.T) {
 		Chain{
 			{
 				Path: "b",
-				Type: syncd.Create,
+				Type: scry.Create,
 				Size: 0,
 			},
 			{
 				Path: "b",
-				Type: syncd.Write,
+				Type: scry.Write,
 				Size: uint64(len(content)),
 				Hash: &hash,
 			},
 			{
 				Path: "b",
-				Type: syncd.Remove,
+				Type: scry.Remove,
 			},
 		},
 	}
@@ -713,7 +713,7 @@ func TestNestedMkdir(t *testing.T) {
 		Chain{
 			{
 				Path: "s1",
-				Type: syncd.Create,
+				Type: scry.Create,
 				Size: DIR_BLOCK_SIZE,
 			},
 		},
@@ -722,7 +722,7 @@ func TestNestedMkdir(t *testing.T) {
 		Chain{
 			{
 				Path: "s1/s2",
-				Type: syncd.Create,
+				Type: scry.Create,
 				Size: DIR_BLOCK_SIZE,
 			},
 		},
@@ -731,7 +731,7 @@ func TestNestedMkdir(t *testing.T) {
 		Chain{
 			{
 				Path: "s1/s2/s3",
-				Type: syncd.Create,
+				Type: scry.Create,
 				Size: DIR_BLOCK_SIZE,
 			},
 		},
@@ -765,7 +765,7 @@ func TestMoveDirWContent(t *testing.T) {
 		Chain{
 			{
 				Path: "s1",
-				Type: syncd.Create,
+				Type: scry.Create,
 				Size: DIR_BLOCK_SIZE,
 			},
 		},
@@ -774,7 +774,7 @@ func TestMoveDirWContent(t *testing.T) {
 		Chain{
 			{
 				Path: "s1/a",
-				Type: syncd.Create,
+				Type: scry.Create,
 				Size: uint64(len(content)),
 				Hash: &hash,
 			},
@@ -817,28 +817,28 @@ func TestMultipleWatchedDirs(t *testing.T) {
 		Chain{
 			{
 				Path: "a",
-				Type: syncd.Create,
+				Type: scry.Create,
 				Size: 0,
 			},
 			{
 				Path: "a",
-				Type: syncd.Write,
+				Type: scry.Write,
 				Size: uint64(len(content)),
 				Hash: &hash,
 			},
 			{
 				Path: "a",
-				Type: syncd.Rename,
+				Type: scry.Rename,
 			},
 			{
 				Path: "b",
-				Type: syncd.Create,
+				Type: scry.Create,
 				Size: uint64(len(content)),
 				Hash: &hash,
 			},
 			{
 				Path: "b",
-				Type: syncd.Remove,
+				Type: scry.Remove,
 			},
 		},
 	}
@@ -848,28 +848,28 @@ func TestMultipleWatchedDirs(t *testing.T) {
 		Chain{
 			{
 				Path: "a",
-				Type: syncd.Create,
+				Type: scry.Create,
 				Size: 0,
 			},
 			{
 				Path: "a",
-				Type: syncd.Write,
+				Type: scry.Write,
 				Size: uint64(len(content)),
 				Hash: &hash,
 			},
 			{
 				Path: "a",
-				Type: syncd.Rename,
+				Type: scry.Rename,
 			},
 			{
 				Path: "b",
-				Type: syncd.Create,
+				Type: scry.Create,
 				Size: uint64(len(content)),
 				Hash: &hash,
 			},
 			{
 				Path: "b",
-				Type: syncd.Remove,
+				Type: scry.Remove,
 			},
 		},
 	}

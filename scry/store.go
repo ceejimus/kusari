@@ -5,7 +5,7 @@
 // node (inode) on the filesystem.
 // To this end: Events go on Chains go in Dirs; Dirs <- Chains <- Events
 
-package syncd
+package scry
 
 import (
 	"fmt"
@@ -88,9 +88,9 @@ type EventStore interface {
 	// add a new event
 	// should error if user specifies chainID of nonexistent Chain
 	AddEvent(event *Event, chainID ID) error
-	// get syncd directory by ID
+	// get scry directory by ID
 	GetDirByID(dirID ID) (*Dir, error)
-	// get syncd dir by path
+	// get scry dir by path
 	GetDirByPath(path string) (*Dir, error)
 	// get chain by ID
 	GetChainByID(chainID ID) (*Chain, error)

@@ -1,4 +1,4 @@
-package syncd
+package scry
 
 import (
 	"path/filepath"
@@ -9,7 +9,7 @@ import (
 	"github.com/stretchr/testify/assert"
 )
 
-func helperTestGetSyncdFiles(t *testing.T, tmpDir utils.TmpDir, include []string, exclude []string, wanted []string) {
+func helperTestGetScriedFiles(t *testing.T, tmpDir utils.TmpDir, include []string, exclude []string, wanted []string) {
 	tmpFs := utils.TmpFs{Dirs: []*utils.TmpDir{&tmpDir}}
 	err := tmpFs.Instantiate()
 	if err != nil {
@@ -17,23 +17,23 @@ func helperTestGetSyncdFiles(t *testing.T, tmpDir utils.TmpDir, include []string
 	}
 	defer tmpFs.Destroy()
 
-	syncdDir := SyncdDirectory{
+	scryDir := ScriedDirectory{
 		Path:    tmpDir.Name,
 		Include: include,
 		Exclude: exclude,
 	}
-	syncdNodes, err := GetSyncdNodes(tmpFs.Path, syncdDir)
+	scryNodes, err := GetScriedNodes(tmpFs.Path, scryDir)
 
-	got := make([]string, len(syncdNodes))
+	got := make([]string, len(scryNodes))
 
-	for i, syncdFile := range syncdNodes {
-		got[i] = fnode.GetRelativePath(syncdFile.Path, filepath.Join(tmpFs.Path, syncdDir.Path))
+	for i, scryFile := range scryNodes {
+		got[i] = fnode.GetRelativePath(scryFile.Path, filepath.Join(tmpFs.Path, scryDir.Path))
 	}
 
 	assert.ElementsMatch(t, wanted, got)
 }
 
-func TestGetSyncdFilesEmptyDir(t *testing.T) {
+func TestGetScriedFilesEmptyDir(t *testing.T) {
 	wanted := []string{}
 
 	tmpDir := utils.TmpDir{
@@ -45,10 +45,10 @@ func TestGetSyncdFilesEmptyDir(t *testing.T) {
 	include := []string{}
 	exclude := []string{}
 
-	helperTestGetSyncdFiles(t, tmpDir, include, exclude, wanted)
+	helperTestGetScriedFiles(t, tmpDir, include, exclude, wanted)
 }
 
-func TestGetSyncdFiles(t *testing.T) {
+func TestGetScriedFiles(t *testing.T) {
 	wanted := []string{
 		"f1.txt",
 		"f2.txt",
@@ -68,10 +68,10 @@ func TestGetSyncdFiles(t *testing.T) {
 	include := []string{}
 	exclude := []string{}
 
-	helperTestGetSyncdFiles(t, tmpDir, include, exclude, wanted)
+	helperTestGetScriedFiles(t, tmpDir, include, exclude, wanted)
 }
 
-func TestGetSyncdFilesIncludeGlob(t *testing.T) {
+func TestGetScriedFilesIncludeGlob(t *testing.T) {
 	wanted := []string{
 		"f1.txt",
 	}
@@ -89,10 +89,10 @@ func TestGetSyncdFilesIncludeGlob(t *testing.T) {
 	include := []string{"f*.txt"}
 	exclude := []string{}
 
-	helperTestGetSyncdFiles(t, tmpDir, include, exclude, wanted)
+	helperTestGetScriedFiles(t, tmpDir, include, exclude, wanted)
 }
 
-func TestGetSyncdFilesExcludeGlob(t *testing.T) {
+func TestGetScriedFilesExcludeGlob(t *testing.T) {
 	wanted := []string{
 		"f1.txt",
 	}
@@ -110,10 +110,10 @@ func TestGetSyncdFilesExcludeGlob(t *testing.T) {
 	include := []string{}
 	exclude := []string{"*.dat", "bad*"}
 
-	helperTestGetSyncdFiles(t, tmpDir, include, exclude, wanted)
+	helperTestGetScriedFiles(t, tmpDir, include, exclude, wanted)
 }
 
-func TestGetSyncdFilesIncludeExcludeGlob(t *testing.T) {
+func TestGetScriedFilesIncludeExcludeGlob(t *testing.T) {
 	wanted := []string{
 		"f1.txt",
 	}
@@ -132,10 +132,10 @@ func TestGetSyncdFilesIncludeExcludeGlob(t *testing.T) {
 	include := []string{"f1*"}
 	exclude := []string{"*.dat", "bad*"}
 
-	helperTestGetSyncdFiles(t, tmpDir, include, exclude, wanted)
+	helperTestGetScriedFiles(t, tmpDir, include, exclude, wanted)
 }
 
-func TestGetSyncdFilesSubDirs(t *testing.T) {
+func TestGetScriedFilesSubDirs(t *testing.T) {
 	wanted := []string{
 		"f1.txt",
 		"f2.txt",
@@ -188,10 +188,10 @@ func TestGetSyncdFilesSubDirs(t *testing.T) {
 	include := []string{}
 	exclude := []string{}
 
-	helperTestGetSyncdFiles(t, tmpDir, include, exclude, wanted)
+	helperTestGetScriedFiles(t, tmpDir, include, exclude, wanted)
 }
 
-func TestGetSyncdFilesSubDirsIncludeExcludeGlob(t *testing.T) {
+func TestGetScriedFilesSubDirsIncludeExcludeGlob(t *testing.T) {
 	wanted := []string{
 		"f1.txt",
 		"f2.txt",
@@ -240,5 +240,5 @@ func TestGetSyncdFilesSubDirsIncludeExcludeGlob(t *testing.T) {
 	include := []string{"*.txt", "**/"}
 	exclude := []string{"sub3/sub4**"}
 
-	helperTestGetSyncdFiles(t, tmpDir, include, exclude, wanted)
+	helperTestGetScriedFiles(t, tmpDir, include, exclude, wanted)
 }

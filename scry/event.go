@@ -1,4 +1,4 @@
-package syncd
+package scry
 
 import (
 	"errors"
@@ -38,7 +38,7 @@ func (t EventType) String() string {
 	case Write:
 		return "write"
 	default:
-		panic(fmt.Sprintf("unexpected syncd.NodeEventType: %#v", t))
+		panic(fmt.Sprintf("unexpected scry.NodeEventType: %#v", t))
 	}
 }
 

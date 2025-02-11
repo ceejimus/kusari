@@ -11,22 +11,22 @@ import (
 	"github.com/ceejimus/kusari/badgerstore"
 	"github.com/ceejimus/kusari/fnode"
 	"github.com/ceejimus/kusari/logger"
-	"github.com/ceejimus/kusari/syncd"
+	"github.com/ceejimus/kusari/scry"
 	"github.com/ceejimus/kusari/utils"
 	"github.com/stretchr/testify/assert"
 )
 
-type Chain []syncd.Event                                 // a chain of events
+type Chain []scry.Event                                  // a chain of events
 type Chains []Chain                                      // a slice of chains expected (given a final path)
 type TailPathToChainMap map[string]Chains                // a map of final paths to expected chains
 type DirPathToTailChainMap map[string]TailPathToChainMap // a map of dir names to path -> chains lookup
 
 // this code was mostly stolen from watcher.go
-func setupStoreFromLocalState(tmpFs *utils.TmpFs, syncdDirs []syncd.SyncdDirectory, store syncd.EventStore) error {
-	for _, dir := range syncdDirs {
+func setupStoreFromLocalState(tmpFs *utils.TmpFs, scryDirs []scry.ScriedDirectory, store scry.EventStore) error {
+	for _, dir := range scryDirs {
 		dirPath := filepath.Join(tmpFs.Path, dir.Path)
 
-		newDir := syncd.Dir{
+		newDir := scry.Dir{
 			Path: dir.Path,
 		}
 		err := store.AddDir(&newDir)
@@ -34,14 +34,14 @@ func setupStoreFromLocalState(tmpFs *utils.TmpFs, syncdDirs []syncd.SyncdDirecto
 			return errors.New(fmt.Sprintf("Failed to add dir to event store:\n%s", err.Error()))
 		}
 
-		nodes, err := syncd.GetSyncdNodes(tmpFs.Path, dir)
+		nodes, err := scry.GetScriedNodes(tmpFs.Path, dir)
 		if err != nil {
 			return errors.New(fmt.Sprintf("Failed to add dir to event store:\n%s", err.Error()))
 		}
 
 		// TODO: ignore nodes based on globs
 		for _, node := range nodes {
-			chain := syncd.Chain{
+			chain := scry.Chain{
 				Ino: node.Ino,
 			}
 
@@ -51,10 +51,10 @@ func setupStoreFromLocalState(tmpFs *utils.TmpFs, syncdDirs []syncd.SyncdDirecto
 			}
 
 			state := node.State()
-			event := syncd.Event{
+			event := scry.Event{
 				Timestamp: time.Now(),
 				Path:      fnode.GetRelativePath(node.Path, dirPath),
-				Type:      syncd.Create,
+				Type:      scry.Create,
 				Size:      state.Size,
 				Hash:      state.Hash,
 				ModTime:   state.ModTime,
@@ -109,18 +109,18 @@ func runApiTest(t *testing.T, tmpFs *utils.TmpFs, watchedDirPaths []string, acti
 	}
 }
 
-func initApiTest(t *testing.T, tmpFs *utils.TmpFs, watchedDirPaths []string, store syncd.EventStore) *syncd.Watcher {
-	syncdDirs := make([]syncd.SyncdDirectory, len(watchedDirPaths))
+func initApiTest(t *testing.T, tmpFs *utils.TmpFs, watchedDirPaths []string, store scry.EventStore) *scry.Scryer {
+	scryDirs := make([]scry.ScriedDirectory, len(watchedDirPaths))
 	for i, watchedDirPath := range watchedDirPaths {
-		syncdDirs[i] = syncd.SyncdDirectory{Path: watchedDirPath}
+		scryDirs[i] = scry.ScriedDirectory{Path: watchedDirPath}
 	}
 
-	if err := setupStoreFromLocalState(tmpFs, syncdDirs, store); err != nil {
+	if err := setupStoreFromLocalState(tmpFs, scryDirs, store); err != nil {
 		tmpFs.Destroy()
 		t.Fatal(err)
 	}
 
-	watcher, err := syncd.InitWatcher(tmpFs.Path, syncdDirs, store)
+	watcher, err := scry.InitScryer(tmpFs.Path, scryDirs, store)
 	if err != nil {
 		tmpFs.Destroy()
 		t.Fatal(err)
@@ -140,7 +140,7 @@ func takeActions(t *testing.T, actions []utils.FsAction) {
 	}
 }
 
-func compareWanted(t *testing.T, wantedMap DirPathToTailChainMap, store syncd.EventStore) error {
+func compareWanted(t *testing.T, wantedMap DirPathToTailChainMap, store scry.EventStore) error {
 	// grab chains from store and massage into our test type
 	gotMap := make(DirPathToTailChainMap)
 	gotDirs := make([]string, 0)
@@ -237,7 +237,7 @@ func compareWanted(t *testing.T, wantedMap DirPathToTailChainMap, store syncd.Ev
 // it ignores hash test if hash on wanted event is nil
 // it doesn't compare timestamps directly but uses to checks order of events
 // doesn't check modtimes
-func eventSlicesMatch(wanted []syncd.Event, got []syncd.Event) error {
+func eventSlicesMatch(wanted []scry.Event, got []scry.Event) error {
 	if len(wanted) != len(got) {
 		return errors.New(fmt.Sprintf("Events list mismatch: len(wanted)=%d, length(got)=%d", len(wanted), len(got)))
 	}
@@ -256,7 +256,7 @@ func eventSlicesMatch(wanted []syncd.Event, got []syncd.Event) error {
 	return nil
 }
 
-func eqEvents(wanted syncd.Event, got syncd.Event) bool {
+func eqEvents(wanted scry.Event, got scry.Event) bool {
 	// always compare types
 	if wanted.Type != got.Type {
 		return false

@@ -5,7 +5,7 @@ import (
 	"fmt"
 	"time"
 
-	"github.com/ceejimus/kusari/syncd"
+	"github.com/ceejimus/kusari/scry"
 	badger "github.com/dgraph-io/badger/v4"
 )
 
@@ -35,13 +35,13 @@ type BadgerDir struct {
 type BadgerChain struct {
 	ID    BadgerID // chainID
 	DirID BadgerID // the dir ID to which this chain belongs
-	Ino   uint64   // the ino of the syncd inode
+	Ino   uint64   // the ino of the scry inode
 }
 
 type BadgerEvent struct {
 	ID        BadgerID        // eventID
 	ChainID   BadgerID        // the chain ID to which this event belongs
-	Type      syncd.EventType // "create", "modify", "delete", "rename", etc.
+	Type      scry.EventType // "create", "modify", "delete", "rename", etc.
 	Timestamp time.Time       // time event processed
 	Path      string          // relative path of file
 	OldPath   string          // the old path (for create events after rename)
@@ -248,13 +248,13 @@ func updateChainLkps(txn *badger.Txn, chainID BadgerID, event *BadgerEvent, tail
 	if err != nil {
 		return err
 	}
-	if event.Type == syncd.Create && tail != nil && tail.Type == syncd.Rename {
+	if event.Type == scry.Create && tail != nil && tail.Type == scry.Rename {
 		// set old path for move finalizations
 		event.OldPath = tail.Path
 		if err := moveChainPathLkp(txn, chain.DirID, event.Path, tail.Path); err != nil {
 			return err
 		}
-	} else if event.Type == syncd.Remove {
+	} else if event.Type == scry.Remove {
 		if err := deleteChainPathLkp(txn, chain.DirID, event.Path); err != nil {
 			return err
 		}

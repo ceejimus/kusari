@@ -1,4 +1,4 @@
-package syncd
+package scry
 
 import (
 	"errors"
@@ -17,9 +17,9 @@ import (
 	"github.com/fsnotify/fsnotify"
 )
 
-type Watcher struct {
+type Scryer struct {
 	ProcessedChanRx <-chan NodeEvent
-	inner           *fsnotify.Watcher
+	watcher         *fsnotify.Watcher
 	store           EventStore
 	topDir          string
 	dirPaths        []string
@@ -29,74 +29,74 @@ type Watcher struct {
 	stopped         int32
 }
 
-func (w *Watcher) getDirForEvent(nodePath string) *Dir {
-	for _, dirPath := range w.dirPaths {
+func (s *Scryer) getDirForEvent(nodePath string) *Dir {
+	for _, dirPath := range s.dirPaths {
 		if strings.HasPrefix(nodePath, dirPath) {
-			dir, _ := w.store.GetDirByPath(dirPath)
+			dir, _ := s.store.GetDirByPath(dirPath)
 			return dir
 		}
 	}
 	return nil
 }
 
-func (w *Watcher) Stop() {
-	w.stopmu.Lock()
-	defer w.stopmu.Unlock()
-	if atomic.LoadInt32(&w.stopping) == 1 {
+func (s *Scryer) Stop() {
+	s.stopmu.Lock()
+	defer s.stopmu.Unlock()
+	if atomic.LoadInt32(&s.stopping) == 1 {
 		return
 	}
-	for _, d := range w.dirPaths {
-		recursiveWatcherRemove(w.inner, filepath.Join(w.topDir, d))
+	for _, d := range s.dirPaths {
+		recursiveWatcherRemove(s.watcher, filepath.Join(s.topDir, d))
 	}
-	atomic.StoreInt32(&w.stopping, 1)
+	atomic.StoreInt32(&s.stopping, 1)
 }
 
-func (w *Watcher) Close() error {
-	w.Stop()
-	for atomic.LoadInt32(&w.stopped) == 0 {
+func (s *Scryer) Close() error {
+	s.Stop()
+	for atomic.LoadInt32(&s.stopped) == 0 {
 		time.Sleep(time.Millisecond * 50)
 	}
-	return w.inner.Close()
+	return s.watcher.Close()
 }
 
-func (w *Watcher) Run() {
-	inner := w.inner
+func (s *Scryer) Run() {
+	watcher := s.watcher
 	// run loop
 	for {
 		select {
-		case event, ok := <-inner.Events:
+		case event, ok := <-watcher.Events:
 			if !ok { // channel closed
 				return
 			}
 			// process the event
 			logger.Trace(fmt.Sprintf("Received watcher event %s", event))
 
-			nodeEvent, err := processEvent(w, event)
+			nodeEvent, err := processEvent(s, event)
 			if err != nil {
 				logger.Error(err.Error())
 				continue
 			}
 			// update watcher for new dirs
-			updateWatcher(w, nodeEvent)
-		case err, ok := <-inner.Errors:
+			updateWatcher(s, nodeEvent)
+		case err, ok := <-watcher.Errors:
 			if !ok { // channel closed
 				return
 			}
 			logger.Error(fmt.Sprintf("Received watcher error:\n%v", err.Error()))
 		default: // no events from fsnotify
 			// if we're stopping and we've no more events
-			if atomic.LoadInt32(&w.stopping) == 1 {
+			if atomic.LoadInt32(&s.stopping) == 1 {
 				logger.Info(fmt.Sprintf("No more events in fsnotify.Watcher. We're done!"))
-				atomic.StoreInt32(&w.stopped, 1)
+				atomic.StoreInt32(&s.stopped, 1)
 				return
 			}
 		}
 	}
 }
 
-func InitWatcher(topDir string, syncdDirs []SyncdDirectory, store EventStore) (*Watcher, error) {
+func InitScryer(topDir string, scryDirs []ScriedDirectory, store EventStore) (*Scryer, error) {
 	// create a watcher
-	inner, err := fsnotify.NewWatcher()
+	watcher, err := fsnotify.NewWatcher()
 	if err != nil {
 		return nil, err
 	}
@@ -110,8 +110,8 @@ func InitWatcher(topDir string, syncdDirs []SyncdDirectory, store EventStore) (*
 
 	// create watcher
 	tx, rx := utils.NewDroppingChannel[NodeEvent](1024)
-	w := Watcher{
-		inner:           inner,
+	s := Scryer{
+		watcher:         watcher,
 		store:           store,
 		topDir:          topDir,
 		dirPaths:        make([]string, len(dirs)),
@@ -122,26 +122,26 @@ func InitWatcher(topDir string, syncdDirs []SyncdDirectory, store EventStore) (*
 	// add dirs to watcher
 	for i, dir := range dirs {
 		// add this path to paths for directory lookups on node event
-		w.dirPaths[i] = dir.Path
+		s.dirPaths[i] = dir.Path
 		// recursively add watcher to the directory and all sub-directories
-		if err = recursiveWatcherAdd(&w, filepath.Join(topDir, dir.Path)); err != nil {
+		if err = recursiveWatcherAdd(&s, filepath.Join(topDir, dir.Path)); err != nil {
 			return nil, err
 		}
 	}
 
-	return &w, nil
+	return &s, nil
 }
 
-func processEvent(watcher *Watcher, event fsnotify.Event) (*NodeEvent, error) {
+func processEvent(s *Scryer, event fsnotify.Event) (*NodeEvent, error) {
 	// transform fsnotify event into local node event
 	nodeEvent := toNodeEvent(&event)
 	if nodeEvent == nil { // ignored event
 		return nil, nil
 	}
 	// get relative paths for store
-	relPath := fnode.GetRelativePath(nodeEvent.FullPath, watcher.topDir)
+	relPath := fnode.GetRelativePath(nodeEvent.FullPath, s.topDir)
 	// lookup stored directory by event name
-	dir := watcher.getDirForEvent(relPath)
+	dir := s.getDirForEvent(relPath)
 	if dir == nil {
 		return nodeEvent, errors.New(fmt.Sprintf("Failed to find dir for event: %s", event))
 	}
@@ -149,35 +149,35 @@ func processEvent(watcher *Watcher, event fsnotify.Event) (*NodeEvent, error) {
 	// get relative path to node
 	nodeEvent.Path = fnode.GetRelativePath(relPath, dir.Path)
 	// process this event
-	if err := processNodeEvent(nodeEvent, watcher.store); err != nil {
+	if err := processNodeEvent(nodeEvent, s.store); err != nil {
 		logger.Error(fmt.Sprintf("Failed to handle fsnotify event:\n%v\n", err.Error()))
 	}
 	// send processed event out
 	nodeEvent.doneTime = time.Now()
-	watcher.processedChanTx <- *nodeEvent
+	s.processedChanTx <- *nodeEvent
 	return nodeEvent, nil
 }
 
-func updateWatcher(w *Watcher, nodeEvent *NodeEvent) {
-	w.stopmu.Lock()
-	defer w.stopmu.Unlock()
-	if atomic.LoadInt32(&w.stopping) == 1 {
+func updateWatcher(s *Scryer, nodeEvent *NodeEvent) {
+	s.stopmu.Lock()
+	defer s.stopmu.Unlock()
+	if atomic.LoadInt32(&s.stopping) == 1 {
 		return
 	}
 	// add/remove sub-directories to watcher
 	// no need to check if node is dir since the function won't walk if it is
 	if nodeEvent.Type == Create {
-		if err := recursiveWatcherAdd(w, nodeEvent.FullPath); err != nil {
+		if err := recursiveWatcherAdd(s, nodeEvent.FullPath); err != nil {
 			logger.Error(fmt.Sprintf("Failed to add %q to watcher.\n", nodeEvent.FullPath))
 		}
 		// if this ISN'T a moved directory
 		if nodeEvent.OldPath == nil {
-			if err := addSubDirsToStore(w, nodeEvent); err != nil {
+			if err := addSubDirsToStore(s, nodeEvent); err != nil {
 				logger.Error(fmt.Sprintf("Failed to add %q to watcher.\n", nodeEvent.FullPath))
 			}
 		}
 	} else if nodeEvent.Type == Rename || nodeEvent.Type == Remove {
-		recursiveWatcherRemove(w.inner, nodeEvent.FullPath)
+		recursiveWatcherRemove(s.watcher, nodeEvent.FullPath)
 	}
 }
 
@@ -185,7 +185,7 @@ func updateWatcher(w *Watcher, nodeEvent *NodeEvent) {
 // adding a directory to an fsnotify watcher will track events for subdirs themselves,
 // but not nodes inside those subdirs - see fsnotify docs
 // also ensure any nodes w/o chains have chains created w/ "artificial" create event
-func recursiveWatcherAdd(w *Watcher, newPath string) error {
+func recursiveWatcherAdd(s *Scryer, newPath string) error {
 	// recursively walk directory - starting at top
 	err := filepath.WalkDir(newPath, func(path string, d fs.DirEntry, err error) error {
 		// an inability to walk a sub-directory would cause problems, but wouldn't be fatal
@@ -198,7 +198,7 @@ func recursiveWatcherAdd(w *Watcher, newPath string) error {
 			return nil
 		}
 		// add path to watcher
-		w.inner.Add(path)
+		s.watcher.Add(path)
 		logger.Debug(fmt.Sprintf("Watching %q\n", path))
 
 		return nil
@@ -220,9 +220,9 @@ func recursiveWatcherRemove(watcher *fsnotify.Watcher, path string) {
 // this function adds new chains and create events for sub-dirs of watched dirs
 // this covers the case when a new subdirectory w/ content is made before
 // we've added the subdirectory to the watch list (e.g. mkdir -p)
-func addSubDirsToStore(w *Watcher, nodeEvent *NodeEvent) error {
-	syncdDirPath := filepath.Join(w.topDir, nodeEvent.dir.Path)
-	dirPath := filepath.Join(syncdDirPath, nodeEvent.Path)
+func addSubDirsToStore(s *Scryer, nodeEvent *NodeEvent) error {
+	scryDirPath := filepath.Join(s.topDir, nodeEvent.dir.Path)
+	dirPath := filepath.Join(scryDirPath, nodeEvent.Path)
 	return filepath.WalkDir(dirPath, func(path string, d fs.DirEntry, err error) error {
 		// skil the root dir of walk as we've already added event
 		if path == dirPath {
@@ -239,7 +239,7 @@ func addSubDirsToStore(w *Watcher, nodeEvent *NodeEvent) error {
 			return nil
 		}
 
-		eventPath := fnode.GetRelativePath(path, syncdDirPath)
+		eventPath := fnode.GetRelativePath(path, scryDirPath)
 		filepath.Join(dirPath, d.Name())
 		// create node from DirEntry
 		info, err := d.Info()
@@ -256,7 +256,7 @@ func addSubDirsToStore(w *Watcher, nodeEvent *NodeEvent) error {
 		// add chain for new node
 		chain := &Chain{Ino: node.Ino}
 		// add new chain
-		if err = w.store.AddChain(chain, nodeEvent.dir.ID); err != nil {
+		if err = s.store.AddChain(chain, nodeEvent.dir.ID); err != nil {
 			logger.Fatal(err.Error())
 			os.Exit(1)
 		}
@@ -270,7 +270,7 @@ func addSubDirsToStore(w *Watcher, nodeEvent *NodeEvent) error {
 			Hash:      state.Hash,
 			ModTime:   state.ModTime,
 		}
-		if err = w.store.AddEvent(&event, chain.ID); err != nil {
+		if err = s.store.AddEvent(&event, chain.ID); err != nil {
 			return err
 		}
 		return nil
